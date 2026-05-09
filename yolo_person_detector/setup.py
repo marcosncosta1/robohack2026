@@ -12,6 +12,8 @@ setup(
         ('share/' + package_name + '/launch', [
             'launch/yolo_pipeline.launch.py',
             'launch/yolo_follower.launch.py',
+            'launch/stereo_image_view.launch.py',
+            'launch/stereo_person_pipeline.launch.py',
         ]),
         ('share/' + package_name + '/config', ['config/yolo_params.yaml']),
     ],
@@ -29,6 +31,9 @@ setup(
             'visualization_node = yolo_person_detector.visualization_node:main',
             'person_follower_node = yolo_person_detector.person_follower_node:main',
             'voice_assistant_node = yolo_person_detector.voice_assistant_node:main',
+            'stereo_image_view_node = yolo_person_detector.stereo_image_view_node:main',
+            'stereo_yolo_detect_node = yolo_person_detector.stereo_yolo_detect_node:main',
+            'stereo_bbox_depth_node = yolo_person_detector.stereo_bbox_depth_node:main',
         ],
     },
 )
