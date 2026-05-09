@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Detect a person, turn with locomotion, and follow to a one-meter standoff.
+"""Detect a person with a front stereo camera, read LiDAR distance, and follow them.
 
 The node logs what it receives from the camera, YOLO, and chest LiDAR. By
 default it says "Hello" when a person is first detected, registers a locomotion
 input source, turns with the legs, walks toward the selected person, and stops
-about one meter away. It does not command the waist/torso joints by default.
+about one meter away. The camera, YOLO, LiDAR, and target-selection path is the
+same as the torso tracker.
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ except ImportError:
 from yolo_person_detector.yolo_wrapper import Detection, InferenceResult, YOLOWrapper
 
 
-SOURCE_NAME = "person_body_follower"
+SOURCE_NAME = "person_follower"
 DEFAULT_MODEL_PATH = "yolov8n.pt"
 TTS_SERVICE = "/aimdk_5Fmsgs/srv/PlayTts"
 
@@ -153,14 +154,6 @@ class LidarSelection:
     selected_points: int = 0
     fps: float = 0.0
     target_angle_rad: float = 0.0
-    width: int = 0
-    height: int = 0
-    point_step: int = 0
-    row_step: int = 0
-    fields: str = ""
-    is_bigendian: bool = False
-    is_dense: bool = False
-    data_size: int = 0
 
 
 @dataclass
@@ -204,12 +197,6 @@ def bool_param(value) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(value)
-
-
-def string_param(value) -> str:
-    if value is None:
-        return ""
-    return str(value).strip()
 
 
 def stamp_to_sec(msg) -> float:
@@ -293,15 +280,9 @@ class X2PersonFollow(Node):
         self.declare_parameter("waist_hold_on_lost", True)
         self.declare_parameter("waist_use_ruckig", True)
 
-        self.camera_topic_type = string_param(
-            self.get_parameter("camera_topic_type").value
-        )
-        self.camera_topic_override = string_param(
-            self.get_parameter("camera_topic").value
-        )
-        self.camera_info_topic_override = string_param(
-            self.get_parameter("camera_info_topic").value
-        )
+        self.camera_topic_type = self.get_parameter("camera_topic_type").value
+        self.camera_topic_override = self.get_parameter("camera_topic").value
+        self.camera_info_topic_override = self.get_parameter("camera_info_topic").value
         self.camera_topic, self.camera_info_topic, self.camera_is_compressed = (
             self.resolve_camera_topics()
         )
@@ -449,18 +430,12 @@ class X2PersonFollow(Node):
                 self.compressed_image_callback,
                 SENSOR_QOS,
             )
-            self.get_logger().info(
-                f"Subscribing Stereo CompressedImage: {self.camera_topic}"
-            )
         else:
             self.image_sub = self.create_subscription(
                 Image,
                 self.camera_topic,
                 self.image_callback,
                 SENSOR_QOS,
-            )
-            self.get_logger().info(
-                f"Subscribing Stereo RGB Image: {self.camera_topic}"
             )
         self.camera_info_sub = None
         if self.camera_info_topic:
@@ -470,16 +445,12 @@ class X2PersonFollow(Node):
                 self.camera_info_callback,
                 CAMERA_INFO_QOS,
             )
-            self.get_logger().info(
-                f"Subscribing Stereo CameraInfo (transient_local): {self.camera_info_topic}"
-            )
         self.lidar_sub = self.create_subscription(
             PointCloud2,
             self.lidar_topic,
             self.lidar_callback,
             SENSOR_QOS,
         )
-        self.get_logger().info(f"Subscribing LIDAR PointCloud2: {self.lidar_topic}")
 
         self.vel_pub = None
         self.waist_pub = None
@@ -582,9 +553,6 @@ class X2PersonFollow(Node):
     def lidar_callback(self, msg: PointCloud2) -> None:
         self.latest_pointcloud = msg
         fps = self.update_arrivals(self.lidar_arrivals)
-        fields_str = " ".join(
-            [f"{field.name}({field.datatype})" for field in msg.fields]
-        )
         self.latest_lidar_meta = LidarSelection(
             distance_m=None,
             source="pointcloud",
@@ -592,14 +560,6 @@ class X2PersonFollow(Node):
             stamp_sec=stamp_to_sec(msg),
             total_points=int(msg.width) * int(msg.height),
             fps=fps,
-            width=int(msg.width),
-            height=int(msg.height),
-            point_step=int(msg.point_step),
-            row_step=int(msg.row_step),
-            fields=fields_str,
-            is_bigendian=bool(msg.is_bigendian),
-            is_dense=bool(msg.is_dense),
-            data_size=len(msg.data),
         )
 
     def waist_state_callback(self, msg: JointStateArray) -> None:
@@ -803,24 +763,6 @@ class X2PersonFollow(Node):
         valid_distances: list[float] = []
         sector_distances: list[float] = []
         total_points = int(cloud.width) * int(cloud.height)
-        fields_str = " ".join(
-            [f"{field.name}({field.datatype})" for field in cloud.fields]
-        )
-        lidar_meta = {
-            "frame_id": cloud.header.frame_id,
-            "stamp_sec": stamp_to_sec(cloud),
-            "total_points": total_points,
-            "fps": float(len(self.lidar_arrivals)),
-            "width": int(cloud.width),
-            "height": int(cloud.height),
-            "point_step": int(cloud.point_step),
-            "row_step": int(cloud.row_step),
-            "fields": fields_str,
-            "is_bigendian": bool(cloud.is_bigendian),
-            "is_dense": bool(cloud.is_dense),
-            "data_size": len(cloud.data),
-            "target_angle_rad": target_angle,
-        }
         range_min = max(self.lidar_min_range_m, 0.0)
         range_max = self.lidar_max_range_m
 
@@ -851,25 +793,37 @@ class X2PersonFollow(Node):
             return LidarSelection(
                 distance_m=None,
                 source="lidar-parse-error",
-                **lidar_meta,
+                frame_id=cloud.header.frame_id,
+                stamp_sec=stamp_to_sec(cloud),
+                total_points=total_points,
+                fps=float(len(self.lidar_arrivals)),
+                target_angle_rad=target_angle,
             )
 
         if not valid_distances:
             return LidarSelection(
                 distance_m=None,
                 source="lidar-empty",
+                frame_id=cloud.header.frame_id,
+                stamp_sec=stamp_to_sec(cloud),
+                total_points=total_points,
                 valid_points=0,
                 sector_points=0,
-                **lidar_meta,
+                fps=float(len(self.lidar_arrivals)),
+                target_angle_rad=target_angle,
             )
 
         if not sector_distances:
             return LidarSelection(
                 distance_m=None,
                 source="lidar-sector-empty",
+                frame_id=cloud.header.frame_id,
+                stamp_sec=stamp_to_sec(cloud),
+                total_points=total_points,
                 valid_points=len(valid_distances),
                 sector_points=0,
-                **lidar_meta,
+                fps=float(len(self.lidar_arrivals)),
+                target_angle_rad=target_angle,
             )
 
         sector_distances.sort()
@@ -877,10 +831,14 @@ class X2PersonFollow(Node):
         return LidarSelection(
             distance_m=statistics.median(sector_distances[:closest_sample_count]),
             source="lidar",
+            frame_id=cloud.header.frame_id,
+            stamp_sec=stamp_to_sec(cloud),
+            total_points=total_points,
             valid_points=len(valid_distances),
             sector_points=len(sector_distances),
             selected_points=closest_sample_count,
-            **lidar_meta,
+            fps=float(len(self.lidar_arrivals)),
+            target_angle_rad=target_angle,
         )
 
     def log_detection(
@@ -945,18 +903,6 @@ class X2PersonFollow(Node):
             f"lidar_fps={lidar.fps:.1f}",
             f"total_points={lidar.total_points}",
         ]
-        if lidar.width or lidar.height:
-            parts.extend(
-                [
-                    f"lidar_size={lidar.width}x{lidar.height}",
-                    f"point_step={lidar.point_step}",
-                    f"row_step={lidar.row_step}",
-                    f"fields={lidar.fields or 'unknown'}",
-                    f"is_bigendian={lidar.is_bigendian}",
-                    f"is_dense={lidar.is_dense}",
-                    f"data_size={lidar.data_size}",
-                ]
-            )
         if selection is not None:
             parts.extend(
                 [
@@ -1046,6 +992,7 @@ class X2PersonFollow(Node):
 
     def control_loop(self) -> None:
         target = self.fresh_target()
+        self.control_waist(target)
 
         if not self.follow_enabled or not AIMDK_AVAILABLE:
             self.publish_stop_throttled()

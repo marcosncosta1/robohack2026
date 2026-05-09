@@ -131,11 +131,11 @@ logs camera/YOLO/LiDAR details, registers a locomotion input source, turns with
 the legs, walks toward the selected person, and stops about one meter away. It
 does not command the waist/torso joints by default.
 
-Before running, put the robot in stable standing/locomotion mode and release the
+Before running, use the controller to put the robot into Stable Standing Mode
+(for position-control stand / locomotion modes press `R2 + X`) and release the
 remote-controller channel:
 
 ```bash
-ros2 run py_examples set_mc_action LD
 aima em stop-app rc
 ```
 
@@ -145,12 +145,12 @@ Run body following:
 ros2 launch x2_motion_audio_tools x2_person_follow.launch.py
 ```
 
-This launch is pinned to the left front stereo camera:
-`/aima/hal/sensor/stereo_head_front_left/rgb_image`, with intrinsics from
-`/aima/hal/sensor/stereo_head_front_left/camera_info`. It reads
-`/aima/hal/sensor/lidar_chest_front/lidar_pointcloud`, walks while the selected
-person remains visible, stops when the target is lost, and stops approaching at
-`stop_distance_m:=1.0` with a small `stop_deadband_m:=0.12`.
+By default, the node uses the same camera and LiDAR defaults as
+`x2_person_track_torso`: `/aima/hal/sensor/stereo_head_front_left/rgb_image`,
+intrinsics from `/aima/hal/sensor/stereo_head_front_left/camera_info`, and
+`/aima/hal/sensor/lidar_chest_front/lidar_pointcloud`. It walks while the
+selected person remains visible, stops when the target is lost, and stops
+approaching at `stop_distance_m:=1.0` with a small `stop_deadband_m:=0.12`.
 
 Only override the camera topics if the HAL topic names differ on the robot:
 

@@ -1,4 +1,4 @@
-"""Launch stereo-camera person detection and body following."""
+"""Launch stereo-camera person detection, TTS greeting, and body following."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -52,13 +52,13 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "camera_topic",
-                default_value="/aima/hal/sensor/stereo_head_front_left/rgb_image",
-                description="Left stereo RGB image topic used for YOLO.",
+                default_value="",
+                description="Optional image topic override. Empty uses camera_topic_type.",
             ),
             DeclareLaunchArgument(
                 "camera_info_topic",
-                default_value="/aima/hal/sensor/stereo_head_front_left/camera_info",
-                description="Left stereo CameraInfo topic.",
+                default_value="",
+                description="Optional CameraInfo topic override. Empty uses camera_topic_type.",
             ),
             DeclareLaunchArgument(
                 "lidar_topic",
