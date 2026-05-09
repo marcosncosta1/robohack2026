@@ -26,6 +26,11 @@ def generate_launch_description():
         default_value='rgbd_head_front',
         description='Active camera (rgbd_head_front, rgb_head_rear, stereo_head_front_left)',
     )
+    topic_type_arg = DeclareLaunchArgument(
+        'topic_type',
+        default_value='rgb_image',
+        description='rgb_image (raw) or rgb_image_compressed (JPEG)',
+    )
     model_arg = DeclareLaunchArgument(
         'model',
         default_value='yolov8n.pt',
@@ -42,14 +47,16 @@ def generate_launch_description():
         description='Detection confidence threshold',
     )
 
-    # Camera Selector Node
     camera_selector = Node(
         package='yolo_person_detector',
         executable='camera_selector_node',
         name='camera_selector',
         parameters=[
             config_file,
-            {'active_camera': LaunchConfiguration('camera')},
+            {
+                'active_camera': LaunchConfiguration('camera'),
+                'topic_type': LaunchConfiguration('topic_type'),
+            },
         ],
         output='screen',
     )
@@ -82,6 +89,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         camera_arg,
+        topic_type_arg,
         model_arg,
         device_arg,
         confidence_arg,

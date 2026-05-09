@@ -33,6 +33,11 @@ def generate_launch_description():
         default_value='rgbd_head_front',
         description='Camera: rgbd_head_front, rgb_head_rear, stereo_head_front_left',
     )
+    topic_type_arg = DeclareLaunchArgument(
+        'topic_type',
+        default_value='rgb_image',
+        description='rgb_image (raw) or rgb_image_compressed (JPEG)',
+    )
     device_arg = DeclareLaunchArgument(
         'device', default_value='cpu',
         description='Inference device: cpu, cuda, mps',
@@ -50,7 +55,13 @@ def generate_launch_description():
         package='yolo_person_detector',
         executable='camera_selector_node',
         name='camera_selector',
-        parameters=[config_file, {'active_camera': LaunchConfiguration('camera')}],
+        parameters=[
+            config_file,
+            {
+                'active_camera': LaunchConfiguration('camera'),
+                'topic_type': LaunchConfiguration('topic_type'),
+            },
+        ],
         output='screen',
     )
 
@@ -82,6 +93,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         camera_arg,
+        topic_type_arg,
         device_arg,
         model_arg,
         follower_arg,

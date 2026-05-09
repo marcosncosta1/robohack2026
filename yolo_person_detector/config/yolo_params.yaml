@@ -24,7 +24,19 @@ camera_selector:
     #   stereo_head_front_left - left stereo camera
     #   stereo_head_front_right - right stereo camera
     active_camera: "rgbd_head_front"
+
+    # Input stream format. Mirrors echo_camera_rgbd's topic_type:
+    #   rgb_image            - raw sensor_msgs/Image
+    #   rgb_image_compressed - sensor_msgs/CompressedImage (JPEG, decoded here)
+    topic_type: "rgb_image"
+
     timeout_sec: 2.0
+    discovery_retry_sec: 2.0
+
+    # Escape hatches for non-standard HAL deployments. Leave empty to use
+    # the per-camera defaults from CAMERA_LAYOUTS.
+    image_topic_override: ""
+    info_topic_override: ""
 
 yolo_visualization:
   ros__parameters:
