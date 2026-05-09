@@ -1,10 +1,11 @@
 # X2 Motion and Audio Tools
 
 ROS 2 helper nodes for AgiBot X2 audio, speech, open-loop coordinate motion,
-forward/backward movement, and cautious arm raising.
+forward/backward movement, torso person tracking, and cautious arm raising.
 
 This package is intentionally separate from `yolo_person_detector` so the
-existing detection and follower code remains unchanged.
+existing detection and follower code remains unchanged. The torso tracker reuses
+that package's YOLO wrapper, but commands only the X2 HAL waist joint by default.
 
 ## Build
 
@@ -13,7 +14,7 @@ From the workspace root:
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/aimdk/install/setup.bash
-colcon build --packages-select x2_motion_audio_tools --symlink-install
+colcon build --packages-up-to x2_motion_audio_tools --symlink-install
 source install/setup.bash
 ```
 
@@ -21,6 +22,13 @@ For the AWS voice assistant and transcription logger:
 
 ```bash
 python3 -m pip install -r src/x2_motion_audio_tools/requirements-voice.txt
+```
+
+For person detection and torso tracking, install the YOLO package dependencies:
+
+```bash
+python3 -m pip install -r src/yolo_person_detector/requirements.txt
+sudo apt install ros-humble-cv-bridge
 ```
 
 ## Audio and Voice
@@ -87,9 +95,11 @@ ros2 run x2_motion_audio_tools x2_go_to_offset_raise_arms \
 
 ## Turn Toward Person With TTS
 
-`x2_turn_to_person_tts` says "On my way" through the X2 TTS service, then turns
-toward an input bearing. It accepts distance too so face/person recognition can
-pass the same estimate shape later, but the turn only uses the angle.
+`x2_turn_to_person_tts` says "On my way" through the X2 TTS service, then
+rotates the torso/waist toward an input bearing. It uses the HAL waist joint
+topic, not locomotion velocity, so it should not step the legs. It accepts
+distance too so face/person recognition can pass the same estimate shape later,
+but the torso turn only uses the angle.
 
 Dry-run the turn without moving:
 
@@ -100,9 +110,10 @@ ros2 run x2_motion_audio_tools x2_turn_to_person_tts --dry-run --angle-deg 25
 Run it on the robot:
 
 ```bash
-ros2 run py_examples set_mc_action LD
 ros2 run x2_motion_audio_tools x2_turn_to_person_tts --angle-deg 25
 ```
+
+If the torso rotates the wrong direction, add `--invert-waist-direction`.
 
 Future face-recognition handoff:
 
@@ -110,6 +121,42 @@ Future face-recognition handoff:
 ros2 run x2_motion_audio_tools x2_turn_to_person_tts \
   --distance-m FACE_DISTANCE \
   --angle-deg FACE_ANGLE
+```
+
+## Person Torso Tracking
+
+`x2_person_follow` runs YOLO person detection on the head camera and turns
+`waist_yaw_joint` so the torso keeps facing the selected person while they stay
+visible. With `follow_enabled:=false`, it does not publish locomotion velocity,
+so the legs should not move.
+
+Run torso tracking without walking:
+
+```bash
+ros2 launch x2_motion_audio_tools x2_person_follow.launch.py follow_enabled:=false
+```
+
+If you want detection logs only, disable waist tracking too:
+
+```bash
+ros2 launch x2_motion_audio_tools x2_person_follow.launch.py \
+  follow_enabled:=false \
+  waist_tracking_enabled:=false
+```
+
+If the torso turns away from the person, flip the waist sign:
+
+```bash
+ros2 launch x2_motion_audio_tools x2_person_follow.launch.py \
+  follow_enabled:=false \
+  waist_invert_direction:=true
+```
+
+Walking follow remains optional and separate:
+
+```bash
+ros2 run py_examples set_mc_action LD
+ros2 launch x2_motion_audio_tools x2_person_follow.launch.py follow_enabled:=true
 ```
 
 ## Forward, Backward, and Arms
