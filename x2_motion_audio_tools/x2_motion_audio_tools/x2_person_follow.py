@@ -87,6 +87,18 @@ CAMERA_TOPICS = {
         "compressed": True,
     },
 }
+TORSO_CAMERA_TOPIC_TYPE = "left_rgb_image"
+TORSO_CAMERA_TOPIC = str(CAMERA_TOPICS[TORSO_CAMERA_TOPIC_TYPE]["image"])
+TORSO_CAMERA_INFO_TOPIC = str(CAMERA_TOPICS[TORSO_CAMERA_TOPIC_TYPE]["info"])
+TORSO_LIDAR_TOPIC = "/aima/hal/sensor/lidar_chest_front/lidar_pointcloud"
+LEGACY_FRONT_CENTER_TOPICS = {
+    "/aima/hal/sensor/rgb_head_front_center/rgb_image",
+    "/aima/hal/sensor/rgb_head_front_center/rgb_image/compressed",
+}
+LEGACY_FRONT_CENTER_INFO_TOPICS = {
+    "/aima/hal/sensor/rgb_head_front_center/camera_info",
+}
+LEGACY_LIDAR_TOPICS = {"/scan"}
 
 SENSOR_QOS = QoSProfile(
     reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -234,9 +246,7 @@ class X2PersonFollow(Node):
         self.declare_parameter("camera_topic_type", "left_rgb_image")
         self.declare_parameter("camera_topic", "")
         self.declare_parameter("camera_info_topic", "")
-        self.declare_parameter(
-            "lidar_topic", "/aima/hal/sensor/lidar_chest_front/lidar_pointcloud"
-        )
+        self.declare_parameter("lidar_topic", TORSO_LIDAR_TOPIC)
         self.declare_parameter("model_path", DEFAULT_MODEL_PATH)
         self.declare_parameter("confidence_threshold", 0.5)
         self.declare_parameter("nms_threshold", 0.45)
@@ -283,10 +293,11 @@ class X2PersonFollow(Node):
         self.camera_topic_type = self.get_parameter("camera_topic_type").value
         self.camera_topic_override = self.get_parameter("camera_topic").value
         self.camera_info_topic_override = self.get_parameter("camera_info_topic").value
+        self.lidar_topic = self.get_parameter("lidar_topic").value
+        self.normalize_sensor_topics()
         self.camera_topic, self.camera_info_topic, self.camera_is_compressed = (
             self.resolve_camera_topics()
         )
-        self.lidar_topic = self.get_parameter("lidar_topic").value
         model_path = self.get_parameter("model_path").value
         confidence = float(self.get_parameter("confidence_threshold").value)
         nms_threshold = float(self.get_parameter("nms_threshold").value)
@@ -542,6 +553,37 @@ class X2PersonFollow(Node):
                 camera_info_topic = derive_camera_info_topic(camera_topic)
 
         return camera_topic, camera_info_topic, is_compressed
+
+    def normalize_sensor_topics(self) -> None:
+        """Keep person-follow perception pinned to the working torso tracker sensors."""
+        if self.camera_topic_type not in CAMERA_TOPICS:
+            self.get_logger().warn(
+                f"Unknown camera_topic_type={self.camera_topic_type!r}; "
+                f"using torso tracker camera type {TORSO_CAMERA_TOPIC_TYPE!r}"
+            )
+            self.camera_topic_type = TORSO_CAMERA_TOPIC_TYPE
+
+        if self.camera_topic_override in LEGACY_FRONT_CENTER_TOPICS:
+            self.get_logger().warn(
+                "Ignoring legacy front-center camera override; "
+                f"using torso tracker camera {TORSO_CAMERA_TOPIC}"
+            )
+            self.camera_topic_override = TORSO_CAMERA_TOPIC
+            self.camera_info_topic_override = TORSO_CAMERA_INFO_TOPIC
+
+        if self.camera_info_topic_override in LEGACY_FRONT_CENTER_INFO_TOPICS:
+            self.get_logger().warn(
+                "Ignoring legacy front-center CameraInfo override; "
+                f"using torso tracker CameraInfo {TORSO_CAMERA_INFO_TOPIC}"
+            )
+            self.camera_info_topic_override = TORSO_CAMERA_INFO_TOPIC
+
+        if self.lidar_topic in LEGACY_LIDAR_TOPICS:
+            self.get_logger().warn(
+                f"Ignoring legacy lidar topic {self.lidar_topic}; "
+                f"using torso tracker LiDAR {TORSO_LIDAR_TOPIC}"
+            )
+            self.lidar_topic = TORSO_LIDAR_TOPIC
 
     def update_arrivals(self, arrivals: deque) -> float:
         now = self.get_clock().now()

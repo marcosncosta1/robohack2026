@@ -151,6 +151,16 @@ intrinsics from `/aima/hal/sensor/stereo_head_front_left/camera_info`, and
 `/aima/hal/sensor/lidar_chest_front/lidar_pointcloud`. It walks while the
 selected person remains visible, stops when the target is lost, and stops
 approaching at `stop_distance_m:=1.0` with a small `stop_deadband_m:=0.12`.
+The follower also ignores legacy `/aima/hal/sensor/rgb_head_front_center/*` and
+`/scan` overrides so stale launch commands do not move it off the working torso
+tracker sensor path.
+
+The startup log should show:
+
+```text
+camera_topic=/aima/hal/sensor/stereo_head_front_left/rgb_image
+lidar_topic=/aima/hal/sensor/lidar_chest_front/lidar_pointcloud
+```
 
 Only override the camera topics if the HAL topic names differ on the robot:
 
