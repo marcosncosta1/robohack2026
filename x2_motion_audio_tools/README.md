@@ -29,8 +29,13 @@ dependencies:
 
 ```bash
 python3 -m pip install -r src/x2_motion_audio_tools/requirements-person.txt
-sudo apt install ros-humble-cv-bridge ros-humble-sensor-msgs-py
+sudo apt install ros-humble-sensor-msgs-py
 ```
+
+The person nodes convert the forced raw stereo `Image` messages directly and do
+not import `cv_bridge`, avoiding the ROS Humble/NumPy 2 `_ARRAY_API` crash. If
+the robot already has NumPy 2 installed from pip, rerun the command above so
+`requirements-person.txt` downgrades it to the ROS-compatible NumPy 1.x line.
 
 ## Audio and Voice
 
@@ -159,9 +164,14 @@ arguments; both are forced onto this sensor path in code.
 The startup log should show:
 
 ```text
+x2_person_follow stereo-local-yolo direct-image v0.1.1
 camera_topic=/aima/hal/sensor/stereo_head_front_left/rgb_image
 lidar_topic=/aima/hal/sensor/lidar_chest_front/lidar_pointcloud
 ```
+
+If the console traceback still says `x2-motion-audio-tools==0.1.0`, the robot is
+running an old installed overlay. Rebuild and source the workspace again before
+launching.
 
 If you want detection logs only:
 

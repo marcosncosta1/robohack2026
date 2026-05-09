@@ -33,11 +33,6 @@ except ImportError:
     point_cloud2 = None
 
 try:
-    from cv_bridge import CvBridge
-except ImportError:
-    CvBridge = None
-
-try:
     import ruckig
 except ImportError:
     ruckig = None
@@ -61,8 +56,17 @@ try:
 except ImportError:
     from x2_yolo_wrapper import Detection, InferenceResult, YOLOWrapper
 
+try:
+    from .x2_image_conversion import (
+        compressed_image_msg_to_bgr8,
+        image_msg_to_bgr8,
+    )
+except ImportError:
+    from x2_image_conversion import compressed_image_msg_to_bgr8, image_msg_to_bgr8
+
 
 SOURCE_NAME = "person_torso_tracker"
+BUILD_MARKER = "x2_person_track_torso stereo-local-yolo direct-image v0.1.1"
 DEFAULT_MODEL_PATH = "yolov8n.pt"
 TTS_SERVICE = "/aimdk_5Fmsgs/srv/PlayTts"
 
@@ -340,16 +344,19 @@ class X2PersonFollow(Node):
         control_rate_hz = float(self.get_parameter("control_rate_hz").value)
         self.control_period_sec = 1.0 / control_rate_hz
 
-        if CvBridge is None:
-            raise RuntimeError(
-                "cv_bridge is not available. Install ros-humble-cv-bridge on the robot."
-            )
-        self.bridge = CvBridge()
         if point_cloud2 is None:
             raise RuntimeError(
                 "sensor_msgs_py is not available. Install the ROS sensor_msgs_py package."
             )
 
+        self.get_logger().info(BUILD_MARKER)
+        self.get_logger().info(
+            "Forced sensors: "
+            f"camera_topic_type={self.camera_topic_type}, "
+            f"camera_topic={self.camera_topic}, "
+            f"camera_info={self.camera_info_topic}, "
+            f"lidar_topic={self.lidar_topic}"
+        )
         self.get_logger().info(f"Loading YOLO model: {model_path} on {device}")
         self.yolo = YOLOWrapper(
             model_path=model_path,
@@ -540,7 +547,7 @@ class X2PersonFollow(Node):
     def image_callback(self, msg: Image) -> None:
         fps = self.update_arrivals(self.camera_arrivals)
         try:
-            image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+            image = image_msg_to_bgr8(msg)
         except Exception as exc:
             self.get_logger().warn(f"Image conversion failed: {exc}")
             return
@@ -562,9 +569,7 @@ class X2PersonFollow(Node):
     def compressed_image_callback(self, msg: CompressedImage) -> None:
         fps = self.update_arrivals(self.camera_arrivals)
         try:
-            image = self.bridge.compressed_imgmsg_to_cv2(
-                msg, desired_encoding="bgr8"
-            )
+            image = compressed_image_msg_to_bgr8(msg)
         except Exception as exc:
             self.get_logger().warn(f"Compressed image conversion failed: {exc}")
             return

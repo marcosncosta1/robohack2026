@@ -3,4 +3,4 @@ ultralytics>=8.0.0
 torch>=2.0.0
 torchvision>=0.15.0
 opencv-python>=4.5.0
-numpy>=1.23.0
+numpy>=1.23.0,<2.0.0
