@@ -756,6 +756,11 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         help="Only move to the offset coordinate; do not raise arms.",
     )
     parser.add_argument(
+        "--arms-only",
+        action="store_true",
+        help="Skip locomotion and only run the arm raise/hold section.",
+    )
+    parser.add_argument(
         "--no-arm-prompt",
         action="store_true",
         help="Do not pause before publishing low-level HAL arm commands.",
@@ -822,6 +827,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--settle-seconds must be >= 0.")
     if args.arm_hold_seconds is not None and args.arm_hold_seconds < 0.0:
         raise ValueError("--arm-hold-seconds must be >= 0.")
+    if args.skip_arms and args.arms_only:
+        raise ValueError("--skip-arms and --arms-only cannot be used together.")
 
 
 def main(args=None) -> int:
@@ -854,14 +861,17 @@ def main(args=None) -> int:
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
-        if not node.register_input_source():
-            return 2
+        if parsed.arms_only:
+            node.get_logger().info("Arms-only mode: locomotion skipped.")
+        else:
+            if not node.register_input_source():
+                return 2
 
-        node.run_travel_plan(plan, parsed)
+            node.run_travel_plan(plan, parsed)
 
-        if parsed.skip_arms:
-            node.get_logger().info("Movement complete; arm raise skipped.")
-            return 0
+            if parsed.skip_arms:
+                node.get_logger().info("Movement complete; arm raise skipped.")
+                return 0
 
         if not parsed.no_arm_prompt:
             node.get_logger().warning(
