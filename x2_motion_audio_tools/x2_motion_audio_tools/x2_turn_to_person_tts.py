@@ -144,6 +144,11 @@ class WaistJointController(Node):
         waist_command_topic: str,
         control_period_sec: float,
         waist_soft_limit_deg: float,
+        max_velocity: float,
+        max_acceleration: float,
+        max_jerk: float,
+        command_kp: float,
+        command_kd: float,
     ) -> None:
         super().__init__("x2_turn_to_person_tts_waist")
         if ruckig is None:
@@ -162,9 +167,11 @@ class WaistJointController(Node):
         self.input.current_position = [0.0] * self.dofs
         self.input.current_velocity = [0.0] * self.dofs
         self.input.current_acceleration = [0.0] * self.dofs
-        self.input.max_velocity = [1.0] * self.dofs
-        self.input.max_acceleration = [1.0] * self.dofs
-        self.input.max_jerk = [25.0] * self.dofs
+        self.input.max_velocity = [max_velocity] * self.dofs
+        self.input.max_acceleration = [max_acceleration] * self.dofs
+        self.input.max_jerk = [max_jerk] * self.dofs
+        self.command_kp = command_kp
+        self.command_kd = command_kd
 
         yaw_joint = WAIST_JOINTS[WAIST_YAW_INDEX]
         soft_limit_rad = math.radians(waist_soft_limit_deg)
@@ -238,6 +245,7 @@ class WaistJointController(Node):
         self,
         yaw_target_rad: float,
         relative_from_current: bool,
+        hold_seconds: float,
     ) -> None:
         target = list(self.input.current_position)
         if not self.state_received:
@@ -263,9 +271,9 @@ class WaistJointController(Node):
             f"Commanding waist_yaw_joint to {math.degrees(yaw_target_rad):+.1f} deg"
         )
         self.control_to_target(WAIST_YAW_INDEX)
+        self.hold_target(hold_seconds)
 
     def control_to_target(self, joint_idx: int) -> None:
-        tolerance = 1e-4
         last_publish = time.monotonic()
 
         while rclpy.ok():
@@ -285,7 +293,10 @@ class WaistJointController(Node):
 
             current = self.output.new_position[joint_idx]
             target = self.input.target_position[joint_idx]
-            if result == ruckig.Result.Finished or abs(current - target) < tolerance:
+            if result == ruckig.Result.Finished:
+                self.get_logger().info(
+                    f"Waist target reached: error={abs(current - target):.5f} rad"
+                )
                 break
 
             elapsed = time.monotonic() - last_publish
@@ -297,6 +308,19 @@ class WaistJointController(Node):
             list(self.input.target_position),
             [0.0] * self.dofs,
         )
+
+    def hold_target(self, hold_seconds: float) -> None:
+        if hold_seconds <= 0.0:
+            return
+
+        self.get_logger().info(f"Holding final waist target for {hold_seconds:.2f} s")
+        end_time = time.monotonic() + hold_seconds
+        target = list(self.input.target_position)
+        zero_velocity = [0.0] * self.dofs
+        while rclpy.ok() and time.monotonic() < end_time:
+            self.publish_command(target, zero_velocity)
+            rclpy.spin_once(self, timeout_sec=0.0)
+            time.sleep(self.control_period_sec)
 
     def publish_command(self, positions: list[float], velocities: list[float]) -> None:
         cmd = JointCommandArray()
@@ -310,8 +334,8 @@ class WaistJointController(Node):
             )
             joint.velocity = velocities[i]
             joint.effort = 0.0
-            joint.stiffness = joint_info.kp
-            joint.damping = joint_info.kd
+            joint.stiffness = self.command_kp
+            joint.damping = self.command_kd
             cmd.joints.append(joint)
 
         self.pub.publish(cmd)
@@ -365,6 +389,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--control-period-sec", type=float, default=0.002)
     parser.add_argument("--state-wait-sec", type=float, default=0.5)
+    parser.add_argument("--hold-seconds", type=float, default=1.5)
+    parser.add_argument("--waist-max-velocity", type=float, default=0.35)
+    parser.add_argument("--waist-max-acceleration", type=float, default=0.25)
+    parser.add_argument("--waist-max-jerk", type=float, default=3.0)
+    parser.add_argument("--waist-kp", type=float, default=16.0)
+    parser.add_argument("--waist-kd", type=float, default=4.0)
     parser.add_argument("--skip-tts", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
@@ -396,6 +426,18 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--control-period-sec must be > 0.")
     if args.state_wait_sec < 0.0:
         raise ValueError("--state-wait-sec must be >= 0.")
+    if args.hold_seconds < 0.0:
+        raise ValueError("--hold-seconds must be >= 0.")
+    if args.waist_max_velocity <= 0.0:
+        raise ValueError("--waist-max-velocity must be > 0.")
+    if args.waist_max_acceleration <= 0.0:
+        raise ValueError("--waist-max-acceleration must be > 0.")
+    if args.waist_max_jerk <= 0.0:
+        raise ValueError("--waist-max-jerk must be > 0.")
+    if args.waist_kp <= 0.0:
+        raise ValueError("--waist-kp must be > 0.")
+    if args.waist_kd < 0.0:
+        raise ValueError("--waist-kd must be >= 0.")
 
 
 def main(args=None) -> int:
@@ -412,7 +454,9 @@ def main(args=None) -> int:
         print(
             f"Plan: distance={distance_m:.2f}m, "
             f"waist_yaw_target={math.degrees(yaw_target_rad):+.1f}deg, "
-            f"mode={mode}, text={parsed.text!r}"
+            f"mode={mode}, vmax={parsed.waist_max_velocity:.2f}rad/s, "
+            f"amax={parsed.waist_max_acceleration:.2f}rad/s^2, "
+            f"jerk={parsed.waist_max_jerk:.1f}rad/s^3, text={parsed.text!r}"
         )
         return 0
 
@@ -423,6 +467,11 @@ def main(args=None) -> int:
         waist_command_topic=parsed.waist_command_topic,
         control_period_sec=parsed.control_period_sec,
         waist_soft_limit_deg=parsed.waist_soft_limit_deg,
+        max_velocity=parsed.waist_max_velocity,
+        max_acceleration=parsed.waist_max_acceleration,
+        max_jerk=parsed.waist_max_jerk,
+        command_kp=parsed.waist_kp,
+        command_kd=parsed.waist_kd,
     )
 
     def signal_handler(sig, _frame):
@@ -444,6 +493,7 @@ def main(args=None) -> int:
         waist.set_waist_yaw_target(
             yaw_target_rad=yaw_target_rad,
             relative_from_current=parsed.relative_from_current,
+            hold_seconds=parsed.hold_seconds,
         )
         return 0
     except KeyboardInterrupt:
