@@ -28,6 +28,7 @@ setup(
             'camera_selector_node = yolo_person_detector.camera_selector_node:main',
             'visualization_node = yolo_person_detector.visualization_node:main',
             'person_follower_node = yolo_person_detector.person_follower_node:main',
+            'voice_assistant_node = yolo_person_detector.voice_assistant_node:main',
         ],
     },
 )
