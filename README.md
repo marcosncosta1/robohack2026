@@ -2,7 +2,7 @@
 
 Real-time person detection and follow-me behavior for the Agibot X2 humanoid robot, built on YOLOv8 and ROS2 Humble.
 
-**This repo is a drop-in ROS2 package.** Clone it into any `ros2_ws/src/` and build with `colcon`.
+**This repo is a colcon workspace** containing the `yolo_person_detector` ROS2 package under `src/yolo_person_detector/`. Clone it and build with `colcon`.
 
 ## What's in the box
 
@@ -37,10 +37,10 @@ pip install pytest
 conda activate yolo_detector
 
 # List available cameras
-python3 scripts/run_detector_standalone.py --list-cameras
+python3 src/yolo_person_detector/scripts/run_detector_standalone.py --list-cameras
 
 # Run detection and save a debug video (index 1 = Continuity Camera on most Macs)
-python3 scripts/run_detector_standalone.py --webcam --cam-index 1 --save-video output.mp4
+python3 src/yolo_person_detector/scripts/run_detector_standalone.py --webcam --cam-index 1 --save-video output.mp4
 ```
 
 Press `q` to quit.
@@ -48,7 +48,7 @@ Press `q` to quit.
 ### Run unit tests
 
 ```bash
-pytest test/ -v
+pytest src/yolo_person_detector/test/ -v
 ```
 
 ---
@@ -73,16 +73,15 @@ pip3 install --user ultralytics opencv-python numpy
 
 ```bash
 # On the robot (e.g. ssh agi@10.0.1.40)
-mkdir -p ~/ros2_ws/src
-cd ~/ros2_ws/src
-git clone git@github.com:alessiosalvatore1703-ops/robohack2026.git yolo_person_detector
+cd ~
+git clone git@github.com:alessiosalvatore1703-ops/robohack2026.git ros2_ws
+cd ros2_ws
 
 # Source your environments (adjust aimdk path as needed)
 source /opt/ros/humble/setup.bash
 source ~/aimdk/install/setup.bash   # wherever aimdk_msgs lives on your robot
 
-# Build
-cd ~/ros2_ws
+# Build (colcon auto-discovers packages under src/)
 colcon build --packages-select yolo_person_detector --symlink-install
 source install/setup.bash
 ```
@@ -93,9 +92,8 @@ source install/setup.bash
 ### Pull updates later
 
 ```bash
-cd ~/ros2_ws/src/yolo_person_detector
-git pull
 cd ~/ros2_ws
+git pull
 colcon build --packages-select yolo_person_detector --symlink-install
 source install/setup.bash
 ```
