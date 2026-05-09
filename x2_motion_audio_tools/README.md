@@ -67,9 +67,10 @@ and `--stream-id 0` accepts either stream.
 ## Coordinate Offset Motion
 
 `x2_go_to_offset_raise_arms` accepts a target distance and bearing, computes a
-point 50 cm to the left or right of that coordinate, walks there using
-step-sized velocity pulses, optionally turns to face the target, then raises
-both arms.
+point 50 cm to the left or right of that coordinate, turns to the direct line
+from the robot to that offset point, walks that one straight line, then raises
+both arms. Add `--face-target` if you want a final in-place turn toward the
+original target after arriving.
 
 Angle convention:
 

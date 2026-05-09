@@ -5,9 +5,10 @@ Input convention:
   - distance is meters from the robot to the person/target
   - angle is degrees from straight ahead, positive to the robot's left
 
-This is open-loop: it converts the requested coordinate into turn/step/turn
-velocity commands. Later, face recognition can pass the same distance and angle
-through --distance-m and --angle-deg instead of using the interactive prompts.
+This is open-loop: it converts the requested coordinate into one straight travel
+line to an offset point beside the person. Later, face recognition can pass the
+same distance and angle through --distance-m and --angle-deg instead of using
+the interactive prompts.
 """
 
 from __future__ import annotations
@@ -68,7 +69,7 @@ class TravelPlan:
     goal_x_m: float
     goal_y_m: float
     goal_distance_m: float
-    turn_to_goal_rad: float
+    line_heading_rad: float
     final_turn_rad: float
     side: str
     side_offset_m: float
@@ -136,11 +137,14 @@ def plan_offset_goal(
     side_offset_m: float,
     face_target: bool,
 ) -> TravelPlan:
-    """Convert person polar coordinates into an offset waypoint plan."""
+    """Convert person polar coordinates into one straight-line offset plan."""
     angle_rad = math.radians(angle_deg)
     target_x = distance_m * math.cos(angle_rad)
     target_y = distance_m * math.sin(angle_rad)
 
+    # The desired point is beside the person, measured perpendicular to the
+    # robot-to-person ray. The robot then turns to the direct line from its
+    # current origin to that point and walks that one line.
     side_sign = 1.0 if side == "left" else -1.0
     left_normal_x = -math.sin(angle_rad)
     left_normal_y = math.cos(angle_rad)
@@ -148,11 +152,11 @@ def plan_offset_goal(
     goal_y = target_y + side_sign * side_offset_m * left_normal_y
 
     goal_distance = math.hypot(goal_x, goal_y)
-    turn_to_goal = math.atan2(goal_y, goal_x) if goal_distance > 0.001 else 0.0
+    line_heading = math.atan2(goal_y, goal_x) if goal_distance > 0.001 else 0.0
 
     if face_target:
         final_heading = math.atan2(target_y - goal_y, target_x - goal_x)
-        final_turn = normalize_angle(final_heading - turn_to_goal)
+        final_turn = normalize_angle(final_heading - line_heading)
     else:
         final_turn = 0.0
 
@@ -162,7 +166,7 @@ def plan_offset_goal(
         goal_x_m=goal_x,
         goal_y_m=goal_y,
         goal_distance_m=goal_distance,
-        turn_to_goal_rad=turn_to_goal,
+        line_heading_rad=line_heading,
         final_turn_rad=final_turn,
         side=side,
         side_offset_m=side_offset_m,
@@ -330,32 +334,22 @@ class CoordinateOffsetRaiseArms(Node):
         self.hold_velocity(duration, angular_velocity=direction * angular_speed)
         self.stop_velocity(0.4)
 
-    def walk_forward_in_step_pulses(
+    def walk_forward_one_line(
         self,
         distance_m: float,
         forward_speed: float,
-        step_length_m: float,
-        step_pause_sec: float,
     ) -> None:
-        remaining = max(0.0, distance_m)
-        step_index = 1
-        estimated_steps = max(1, math.ceil(remaining / step_length_m))
+        distance_m = max(0.0, distance_m)
+        if distance_m <= 0.01:
+            self.get_logger().info("Straight-line walk skipped; already at goal.")
+            return
+
+        duration = distance_m / forward_speed
         self.get_logger().info(
-            f"Walking {distance_m:.2f} m as about {estimated_steps} step pulses."
+            f"Walking one straight line: {distance_m:.2f} m "
+            f"for {duration:.2f} s at {forward_speed:.2f} m/s."
         )
-
-        while rclpy.ok() and remaining > 0.01:
-            segment = min(step_length_m, remaining)
-            duration = segment / forward_speed
-            self.get_logger().info(
-                f"Step pulse {step_index}/{estimated_steps}: "
-                f"{segment:.2f} m for {duration:.2f} s."
-            )
-            self.hold_velocity(duration, forward_velocity=forward_speed)
-            self.stop_velocity(step_pause_sec)
-            remaining -= segment
-            step_index += 1
-
+        self.hold_velocity(duration, forward_velocity=forward_speed)
         self.stop_velocity(0.75)
 
     def wait_for_arm_state(self, timeout_sec: float) -> bool:
@@ -613,18 +607,16 @@ class CoordinateOffsetRaiseArms(Node):
             time.sleep(period)
 
     def run_travel_plan(self, plan: TravelPlan, args: argparse.Namespace) -> None:
-        self.get_logger().info(format_plan(plan, args.step_length_m))
+        self.get_logger().info(format_plan(plan))
 
         self.rotate_by(
-            plan.turn_to_goal_rad,
+            plan.line_heading_rad,
             args.turn_speed,
             args.invert_turn_direction,
         )
-        self.walk_forward_in_step_pulses(
+        self.walk_forward_one_line(
             plan.goal_distance_m,
             args.forward_speed,
-            args.step_length_m,
-            args.step_pause_sec,
         )
         if args.face_target:
             self.rotate_by(
@@ -635,15 +627,14 @@ class CoordinateOffsetRaiseArms(Node):
         self.stop_velocity(args.settle_seconds)
 
 
-def format_plan(plan: TravelPlan, step_length_m: float) -> str:
-    estimated_steps = max(1, math.ceil(plan.goal_distance_m / step_length_m))
+def format_plan(plan: TravelPlan) -> str:
     return (
         "Plan: "
         f"person=({plan.target_x_m:.2f}m forward, {plan.target_y_m:.2f}m left), "
         f"goal={plan.side_offset_m:.2f}m {plan.side} of person "
         f"at ({plan.goal_x_m:.2f}m forward, {plan.goal_y_m:.2f}m left), "
-        f"turn={math.degrees(plan.turn_to_goal_rad):+.1f}deg, "
-        f"walk={plan.goal_distance_m:.2f}m in ~{estimated_steps} steps, "
+        f"line_heading={math.degrees(plan.line_heading_rad):+.1f}deg, "
+        f"line_distance={plan.goal_distance_m:.2f}m, "
         f"final_turn={math.degrees(plan.final_turn_rad):+.1f}deg"
     )
 
@@ -697,8 +688,18 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--side-offset-m", type=float, default=0.50)
     parser.add_argument("--forward-speed", type=float, default=0.20)
     parser.add_argument("--turn-speed", type=float, default=0.35)
-    parser.add_argument("--step-length-m", type=float, default=0.25)
-    parser.add_argument("--step-pause-sec", type=float, default=0.25)
+    parser.add_argument(
+        "--step-length-m",
+        type=float,
+        default=0.25,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--step-pause-sec",
+        type=float,
+        default=0.25,
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--settle-seconds", type=float, default=0.75)
     parser.add_argument("--control-hz", type=float, default=50.0)
     parser.add_argument("--arm-angle-deg", type=float, default=90.0)
@@ -733,12 +734,21 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--face-target",
+        dest="face_target",
+        action="store_true",
+        help=(
+            "After the straight-line walk, turn in place to face the target "
+            "coordinate."
+        ),
+    )
+    parser.add_argument(
         "--no-face-target",
         dest="face_target",
         action="store_false",
-        help="Skip the final turn toward the original target coordinate.",
+        help=argparse.SUPPRESS,
     )
-    parser.set_defaults(face_target=True)
+    parser.set_defaults(face_target=False)
     parser.add_argument(
         "--skip-arms",
         action="store_true",
@@ -826,7 +836,7 @@ def main(args=None) -> int:
     )
 
     if parsed.dry_run:
-        print(format_plan(plan, parsed.step_length_m))
+        print(format_plan(plan))
         return 0
 
     rclpy.init()
