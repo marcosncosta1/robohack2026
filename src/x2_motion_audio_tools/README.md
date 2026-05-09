@@ -1,0 +1,106 @@
+# X2 Motion and Audio Tools
+
+ROS 2 helper nodes for AgiBot X2 audio, speech, open-loop coordinate motion,
+forward/backward movement, and cautious arm raising.
+
+This package is intentionally separate from `yolo_person_detector` so the
+existing detection and follower code remains unchanged.
+
+## Build
+
+From the workspace root:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/aimdk/install/setup.bash
+colcon build --packages-select x2_motion_audio_tools --symlink-install
+source install/setup.bash
+```
+
+For the AWS voice assistant and transcription logger:
+
+```bash
+python3 -m pip install -r src/x2_motion_audio_tools/requirements-voice.txt
+```
+
+## Audio and Voice
+
+Log raw sound level without AWS:
+
+```bash
+ros2 run x2_motion_audio_tools x2_sound_logger --stream-id 2
+```
+
+Log VAD activity and optionally transcribe utterances:
+
+```bash
+ros2 run x2_motion_audio_tools x2_mic_logger --stream-id 2 --verbose-levels
+ros2 run x2_motion_audio_tools x2_mic_logger --stream-id 2 --transcribe
+```
+
+Run the Bedrock voice assistant:
+
+```bash
+export AWS_REGION=us-east-1
+export BEDROCK_MODEL_ID=us.amazon.nova-2-lite-v1:0
+export TRANSCRIBE_LANGUAGE_CODE=en-US
+ros2 run x2_motion_audio_tools x2_bedrock_voice_assistant --stream-id 2
+```
+
+`--stream-id 1` uses the onboard mic, `--stream-id 2` uses the external mic,
+and `--stream-id 0` accepts either stream.
+
+## Coordinate Offset Motion
+
+`x2_go_to_offset_raise_arms` accepts a target distance and bearing, computes a
+point 50 cm to the left or right of that coordinate, walks there using
+step-sized velocity pulses, optionally turns to face the target, then raises
+both arms.
+
+Angle convention:
+
+- `0` degrees means straight ahead
+- positive degrees are to the robot's left
+- negative degrees are to the robot's right
+
+Dry-run the math without moving:
+
+```bash
+ros2 run x2_motion_audio_tools x2_go_to_offset_raise_arms --dry-run
+```
+
+Run movement only first:
+
+```bash
+ros2 run py_examples set_mc_action LD
+ros2 run x2_motion_audio_tools x2_go_to_offset_raise_arms --skip-arms
+```
+
+Run with known values:
+
+```bash
+ros2 run x2_motion_audio_tools x2_go_to_offset_raise_arms \
+  --distance-m 2.0 \
+  --angle-deg 15 \
+  --side left
+```
+
+## Forward, Backward, and Arms
+
+Forward/backward movement only:
+
+```bash
+ros2 run py_examples set_mc_action LD
+ros2 run x2_motion_audio_tools x2_forward_backward_steps
+```
+
+Forward/backward movement followed by a cautious arm raise:
+
+```bash
+ros2 run py_examples set_mc_action LD
+ros2 run x2_motion_audio_tools x2_forward_back_raise_arms
+```
+
+The motion nodes publish high-level locomotion velocity commands. Arm raising
+uses low-level HAL joint commands, so only run arm sections when the robot is
+stable and your AimDK/HAL safety procedure is satisfied.
