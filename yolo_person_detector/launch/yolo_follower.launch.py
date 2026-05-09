@@ -9,9 +9,10 @@ Usage (detection only, robot does not move):
     ros2 launch yolo_person_detector yolo_follower.launch.py
 
 Usage (detection + active following — robot will move):
-    # 1. First put the robot in locomotion mode:
-    ros2 run py_examples set_mc_action LD
-    # 2. Then launch with follower enabled:
+    # The follower will transition the robot to LOCOMOTION_DEFAULT itself
+    # (DAMPING -> JOINT -> LOCOMOTION) via SetMcAction. If you prefer to do
+    # that manually, set auto_enable_locomotion:=false and run:
+    #     ros2 run py_examples set_mc_action LD
     ros2 launch yolo_person_detector yolo_follower.launch.py follower_enabled:=true
 """
 

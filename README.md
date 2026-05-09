@@ -144,14 +144,24 @@ ros2 run rqt_image_view rqt_image_view /yolo/detection_image
 **Start sequence:**
 
 ```bash
-# 1. Put the robot in locomotion mode
-ros2 run py_examples set_mc_action LD
-
-# 2. Launch with following enabled
+# Launch with following enabled — the node will put the robot into
+# LOCOMOTION_DEFAULT itself (DD -> JD -> LD via SetMcAction).
 ros2 launch yolo_person_detector yolo_follower.launch.py \
     follower_enabled:=true \
     device:=cuda
 ```
+
+You can also leave `follower_enabled:=false` and flip the switch at runtime:
+
+```bash
+ros2 topic pub -1 /yolo/follower/enable std_msgs/Bool "data: true"
+# ...and to stop following without killing the node:
+ros2 topic pub -1 /yolo/follower/enable std_msgs/Bool "data: false"
+```
+
+If you prefer to drive the motion-mode state machine yourself (e.g. with
+`ros2 run py_examples set_mc_action LD`), set `auto_enable_locomotion: false`
+in `config/yolo_params.yaml` so the node won't issue `SetMcAction` calls.
 
 Stop with `Ctrl+C` — watchdog zeros velocity within 50ms.
 
