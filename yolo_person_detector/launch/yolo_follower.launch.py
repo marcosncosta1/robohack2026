@@ -30,9 +30,9 @@ def generate_launch_description():
 
     camera_arg = DeclareLaunchArgument(
         'camera',
-        default_value='rgbd_head_front_center',
+        default_value='rgb_head_front_center',
         description=(
-            'Camera: rgbd_head_front_center, rgb_head_rear, '
+            'Camera: rgb_head_front_center, rgb_head_rear, '
             'stereo_head_front_left, stereo_head_front_right'
         ),
     )

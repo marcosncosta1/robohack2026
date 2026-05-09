@@ -9,13 +9,10 @@ Topics + QoS here mirror that example exactly, and we additionally
 support the compressed RGB stream which is typically cheaper on the
 network.
 
-Per Agibot X2 HAL (rgbd_head_front_center):
+Per Agibot X2 HAL (rgb_head_front_center, plain RGB):
   - rgb_image                   sensor_msgs/Image            raw RGB
   - rgb_image/compressed        sensor_msgs/CompressedImage  JPEG
-  - rgb_camera_info             sensor_msgs/CameraInfo
-  - depth_image                 sensor_msgs/Image            depth (16UC1)
-  - depth_pointcloud            sensor_msgs/PointCloud2
-  - depth_camera_info           sensor_msgs/CameraInfo
+  - camera_info                 sensor_msgs/CameraInfo
 
 All use SensorDataQoS (BEST_EFFORT + KEEP_LAST + VOLATILE, depth 5).
 """
@@ -49,17 +46,13 @@ SENSOR_DATA_QOS = QoSProfile(
 )
 
 
-# Per-camera topic layout. For rgbd_head_front_center we follow the Agibot SDK
-# example verbatim; the other cameras are plain RGB with /rgb_image +
-# /camera_info as seen on the X2 topic list.
+# Per-camera topic layout. All X2 head cameras follow the same RGB layout:
+# /rgb_image (raw), /rgb_image/compressed (JPEG), /camera_info.
 CAMERA_LAYOUTS = {
-    'rgbd_head_front_center': {
-        'rgb_raw':        '/aima/hal/sensor/rgbd_head_front_center/rgb_image',
-        'rgb_compressed': '/aima/hal/sensor/rgbd_head_front_center/rgb_image/compressed',
-        'rgb_info':       '/aima/hal/sensor/rgbd_head_front_center/rgb_camera_info',
-        'depth_image':    '/aima/hal/sensor/rgbd_head_front_center/depth_image',
-        'depth_info':     '/aima/hal/sensor/rgbd_head_front_center/depth_camera_info',
-        'pointcloud':     '/aima/hal/sensor/rgbd_head_front_center/depth_pointcloud',
+    'rgb_head_front_center': {
+        'rgb_raw':        '/aima/hal/sensor/rgb_head_front_center/rgb_image',
+        'rgb_compressed': '/aima/hal/sensor/rgb_head_front_center/rgb_image/compressed',
+        'rgb_info':       '/aima/hal/sensor/rgb_head_front_center/camera_info',
     },
     'rgb_head_rear': {
         'rgb_raw':        '/aima/hal/sensor/rgb_head_rear/rgb_image',
@@ -99,7 +92,7 @@ class CameraSelectorNode(Node):
         super().__init__('camera_selector')
 
         # --- Parameters --------------------------------------------------
-        self.declare_parameter('active_camera', 'rgbd_head_front_center')
+        self.declare_parameter('active_camera', 'rgb_head_front_center')
         # 'rgb_image' (raw) or 'rgb_image_compressed'. Mirrors the
         # topic_type names used by echo_camera_rgbd for familiarity.
         self.declare_parameter('topic_type', 'rgb_image')
@@ -120,9 +113,9 @@ class CameraSelectorNode(Node):
             self.get_logger().warn(
                 f"Unknown camera '{self.active_camera}', "
                 f"available: {list(CAMERA_LAYOUTS.keys())}. "
-                f"Defaulting to 'rgbd_head_front_center'."
+                f"Defaulting to 'rgb_head_front_center'."
             )
-            self.active_camera = 'rgbd_head_front_center'
+            self.active_camera = 'rgb_head_front_center'
 
         if self.topic_type not in ('rgb_image', 'rgb_image_compressed'):
             self.get_logger().warn(

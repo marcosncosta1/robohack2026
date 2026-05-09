@@ -57,7 +57,7 @@ class YOLODetectorNode(Node):
         self.declare_parameter('nms_threshold', 0.45)
         self.declare_parameter('device', 'cpu')
         self.declare_parameter('input_size', 640)
-        self.declare_parameter('input_topic', '/aima/hal/sensor/rgbd_head_front_center/rgb_image')
+        self.declare_parameter('input_topic', '/aima/hal/sensor/rgb_head_front_center/rgb_image')
         self.declare_parameter('publish_annotated', True)
 
         # Get parameters

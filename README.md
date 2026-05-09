@@ -121,7 +121,7 @@ Optional arguments:
 
 ```bash
 ros2 launch yolo_person_detector yolo_pipeline.launch.py \
-    camera:=rgbd_head_front_center \
+    camera:=rgb_head_front_center \
     device:=cuda \
     confidence:=0.6
 ```
@@ -194,7 +194,7 @@ All parameters tunable in `config/yolo_params.yaml` → `person_follower`:
 
 | Topic | Type |
 |-------|------|
-| `/aima/hal/sensor/rgbd_head_front_center/rgb_image` | `sensor_msgs/Image` |
+| `/aima/hal/sensor/rgb_head_front_center/rgb_image` | `sensor_msgs/Image` |
 | `/aima/hal/sensor/rgb_head_rear/rgb_image` | `sensor_msgs/Image` |
 | `/aima/hal/sensor/stereo_head_front_left/rgb_image` | `sensor_msgs/Image` |
 
@@ -240,4 +240,4 @@ scp ~/.cache/ultralytics/yolov8n.pt agi@10.0.1.40:~/ros2_ws/src/robohack2026/yol
 ```
 
 **Camera topic silent**
-Check the sensor is running: `ros2 topic hz /aima/hal/sensor/rgbd_head_front_center/rgb_image`. If empty, the HAL sensor service isn't started on the robot.
+Check the sensor is running: `ros2 topic hz /aima/hal/sensor/rgb_head_front_center/rgb_image`. If empty, the HAL sensor service isn't started on the robot.
