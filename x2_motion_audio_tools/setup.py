@@ -23,6 +23,7 @@ setup(
             "x2_sound_logger = x2_motion_audio_tools.x2_sound_logger:main",
             "x2_mic_logger = x2_motion_audio_tools.x2_mic_logger:main",
             "x2_go_to_offset_raise_arms = x2_motion_audio_tools.x2_go_to_offset_raise_arms:main",
+            "x2_turn_to_person_tts = x2_motion_audio_tools.x2_turn_to_person_tts:main",
             "x2_forward_back_raise_arms = x2_motion_audio_tools.x2_forward_back_raise_arms:main",
             "x2_forward_backward_steps = x2_motion_audio_tools.x2_forward_backward_steps:main",
         ],

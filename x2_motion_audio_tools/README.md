@@ -85,6 +85,33 @@ ros2 run x2_motion_audio_tools x2_go_to_offset_raise_arms \
   --side left
 ```
 
+## Turn Toward Person With TTS
+
+`x2_turn_to_person_tts` says "On my way" through the X2 TTS service, then turns
+toward an input bearing. It accepts distance too so face/person recognition can
+pass the same estimate shape later, but the turn only uses the angle.
+
+Dry-run the turn without moving:
+
+```bash
+ros2 run x2_motion_audio_tools x2_turn_to_person_tts --dry-run --angle-deg 25
+```
+
+Run it on the robot:
+
+```bash
+ros2 run py_examples set_mc_action LD
+ros2 run x2_motion_audio_tools x2_turn_to_person_tts --angle-deg 25
+```
+
+Future face-recognition handoff:
+
+```bash
+ros2 run x2_motion_audio_tools x2_turn_to_person_tts \
+  --distance-m FACE_DISTANCE \
+  --angle-deg FACE_ANGLE
+```
+
 ## Forward, Backward, and Arms
 
 Forward/backward movement only:
