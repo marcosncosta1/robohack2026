@@ -32,7 +32,7 @@ from yolo_person_detector.yolo_wrapper import YOLOWrapper
 
 # Agibot X2 camera topics
 CAMERA_TOPICS = {
-    'rgbd_head_front': '/aima/hal/sensor/rgbd_head_front/rgb_image',
+    'rgbd_head_front_center': '/aima/hal/sensor/rgbd_head_front_center/rgb_image',
     'rgb_head_rear': '/aima/hal/sensor/rgb_head_rear/rgb_image',
     'stereo_head_front_left': '/aima/hal/sensor/stereo_head_front_left/rgb_image',
     'stereo_head_front_right': '/aima/hal/sensor/stereo_head_front_right/rgb_image',
@@ -233,7 +233,7 @@ def main():
     parser.add_argument('--model', default='yolov8n.pt', help='YOLO model path')
     parser.add_argument('--confidence', type=float, default=0.5, help='Confidence threshold')
     parser.add_argument('--device', default='cpu', help='Device: cpu, cuda, mps (cpu is fastest for yolov8n on Mac)')
-    parser.add_argument('--camera', default='rgbd_head_front',
+    parser.add_argument('--camera', default='rgbd_head_front_center',
                         choices=list(CAMERA_TOPICS.keys()),
                         help='ROS2 camera to use (robot mode)')
     parser.add_argument('--webcam', action='store_true', help='Use local webcam for testing')

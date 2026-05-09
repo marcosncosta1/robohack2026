@@ -121,7 +121,7 @@ Optional arguments:
 
 ```bash
 ros2 launch yolo_person_detector yolo_pipeline.launch.py \
-    camera:=rgbd_head_front \
+    camera:=rgbd_head_front_center \
     device:=cuda \
     confidence:=0.6
 ```
@@ -194,7 +194,7 @@ All parameters tunable in `config/yolo_params.yaml` → `person_follower`:
 
 | Topic | Type |
 |-------|------|
-| `/aima/hal/sensor/rgbd_head_front/rgb_image` | `sensor_msgs/Image` |
+| `/aima/hal/sensor/rgbd_head_front_center/rgb_image` | `sensor_msgs/Image` |
 | `/aima/hal/sensor/rgb_head_rear/rgb_image` | `sensor_msgs/Image` |
 | `/aima/hal/sensor/stereo_head_front_left/rgb_image` | `sensor_msgs/Image` |
 

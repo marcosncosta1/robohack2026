@@ -10,8 +10,10 @@ yolo_detector:
     device: "cpu"  # "cuda" for GPU, "cpu" for CPU, "mps" for Apple Silicon
     input_size: 640
 
-    # Input topic (default: RGBD head front camera)
-    input_topic: "/aima/hal/sensor/rgbd_head_front/rgb_image"
+    # Input topic: normally left as /yolo/input_image (republished by
+    # camera_selector_node). Overridden here only if you want yolo_detector
+    # to subscribe directly to a HAL camera topic, bypassing the selector.
+    input_topic: "/yolo/input_image"
 
     # Visualization
     publish_annotated: true
@@ -19,11 +21,11 @@ yolo_detector:
 camera_selector:
   ros__parameters:
     # Available cameras:
-    #   rgbd_head_front - RGB-D camera (has depth)
-    #   rgb_head_rear - rear-facing RGB camera
-    #   stereo_head_front_left - left stereo camera
+    #   rgbd_head_front_center  - RGB-D camera (has depth, point cloud)
+    #   rgb_head_rear           - rear-facing RGB camera
+    #   stereo_head_front_left  - left stereo camera
     #   stereo_head_front_right - right stereo camera
-    active_camera: "rgbd_head_front"
+    active_camera: "rgbd_head_front_center"
 
     # Input stream format. Mirrors echo_camera_rgbd's topic_type:
     #   rgb_image            - raw sensor_msgs/Image

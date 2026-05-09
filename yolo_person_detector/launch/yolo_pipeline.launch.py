@@ -23,8 +23,11 @@ def generate_launch_description():
     # Launch arguments
     camera_arg = DeclareLaunchArgument(
         'camera',
-        default_value='rgbd_head_front',
-        description='Active camera (rgbd_head_front, rgb_head_rear, stereo_head_front_left)',
+        default_value='rgbd_head_front_center',
+        description=(
+            'Active camera (rgbd_head_front_center, rgb_head_rear, '
+            'stereo_head_front_left, stereo_head_front_right)'
+        ),
     )
     topic_type_arg = DeclareLaunchArgument(
         'topic_type',
