@@ -9,7 +9,10 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name + '/launch', ['launch/yolo_pipeline.launch.py']),
+        ('share/' + package_name + '/launch', [
+            'launch/yolo_pipeline.launch.py',
+            'launch/yolo_follower.launch.py',
+        ]),
         ('share/' + package_name + '/config', ['config/yolo_params.yaml']),
     ],
     install_requires=['setuptools'],
@@ -24,6 +27,7 @@ setup(
             'yolo_detector_node = yolo_person_detector.yolo_detector_node:main',
             'camera_selector_node = yolo_person_detector.camera_selector_node:main',
             'visualization_node = yolo_person_detector.visualization_node:main',
+            'person_follower_node = yolo_person_detector.person_follower_node:main',
         ],
     },
 )

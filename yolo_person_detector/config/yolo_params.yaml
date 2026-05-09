@@ -34,3 +34,28 @@ yolo_visualization:
     bbox_thickness: 2
     show_confidence: true
     font_scale: 0.6
+
+person_follower:
+  ros__parameters:
+    # SAFETY: follower is disabled by default
+    # Enable by launching with follower_enabled:=true, after setting the robot
+    # to LOCOMOTION_DEFAULT mode via `ros2 run py_examples set_mc_action LD`
+    enabled: false
+
+    # Control gains (visual servoing, no depth required)
+    target_bbox_height_ratio: 0.6   # Target person height as fraction of image height
+    forward_gain: 0.8               # Forward error -> velocity gain
+    angular_gain: 1.5               # Horizontal error -> angular velocity gain
+
+    # Velocity limits (robot min/max thresholds, see mc_locomotion_velocity.py)
+    max_forward_speed: 0.6          # m/s  (robot supports up to 1.0)
+    min_forward_speed: 0.2          # m/s  (robot min threshold)
+    max_angular_speed: 0.8          # rad/s (robot supports up to 1.0)
+    min_angular_speed: 0.1          # rad/s (robot min threshold)
+
+    # Behavior
+    center_deadzone_px: 50          # Ignore small horizontal errors
+    watchdog_timeout_sec: 0.5       # Stop robot if no detection for this duration
+    control_rate_hz: 20.0           # Control loop rate
+    image_width: 640                # Auto-updated from input stream
+    image_height: 480
