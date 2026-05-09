@@ -9,7 +9,13 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml", "README.md", "requirements-voice.txt"]),
-        ("share/" + package_name + "/launch", ["launch/x2_person_follow.launch.py"]),
+        (
+            "share/" + package_name + "/launch",
+            [
+                "launch/x2_person_follow.launch.py",
+                "launch/x2_person_track_torso.launch.py",
+            ],
+        ),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -26,6 +32,7 @@ setup(
             "x2_go_to_offset_raise_arms = x2_motion_audio_tools.x2_go_to_offset_raise_arms:main",
             "x2_turn_to_person_tts = x2_motion_audio_tools.x2_turn_to_person_tts:main",
             "x2_person_follow = x2_motion_audio_tools.x2_person_follow:main",
+            "x2_person_track_torso = x2_motion_audio_tools.x2_person_track_torso:main",
             "x2_forward_back_raise_arms = x2_motion_audio_tools.x2_forward_back_raise_arms:main",
             "x2_forward_backward_steps = x2_motion_audio_tools.x2_forward_backward_steps:main",
         ],

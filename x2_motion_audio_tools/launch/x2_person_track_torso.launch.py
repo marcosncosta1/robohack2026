@@ -1,4 +1,4 @@
-"""Launch stereo-camera person detection and body following."""
+"""Launch stereo-camera person detection, TTS greeting, and torso tracking."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -19,12 +19,6 @@ def generate_launch_description():
     tts_reset_after_lost_sec = LaunchConfiguration("tts_reset_after_lost_sec")
     follow_enabled = LaunchConfiguration("follow_enabled")
     stop_distance_m = LaunchConfiguration("stop_distance_m")
-    stop_deadband_m = LaunchConfiguration("stop_deadband_m")
-    forward_gain = LaunchConfiguration("forward_gain")
-    angular_gain = LaunchConfiguration("angular_gain")
-    max_forward_speed = LaunchConfiguration("max_forward_speed")
-    max_angular_speed = LaunchConfiguration("max_angular_speed")
-    max_forward_bearing_deg = LaunchConfiguration("max_forward_bearing_deg")
     lidar_window_deg = LaunchConfiguration("lidar_window_deg")
     lidar_angle_offset_deg = LaunchConfiguration("lidar_angle_offset_deg")
     lidar_min_range_m = LaunchConfiguration("lidar_min_range_m")
@@ -92,43 +86,13 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "follow_enabled",
-                default_value="true",
-                description="When true, publish locomotion commands to follow the person.",
+                default_value="false",
+                description="When true, publish locomotion commands.",
             ),
             DeclareLaunchArgument(
                 "stop_distance_m",
-                default_value="1.0",
+                default_value="1.2",
                 description="Distance where the robot stops approaching.",
-            ),
-            DeclareLaunchArgument(
-                "stop_deadband_m",
-                default_value="0.12",
-                description="Extra distance buffer around stop_distance_m to avoid creep.",
-            ),
-            DeclareLaunchArgument(
-                "forward_gain",
-                default_value="0.28",
-                description="Forward speed gain from distance error to m/s.",
-            ),
-            DeclareLaunchArgument(
-                "angular_gain",
-                default_value="1.0",
-                description="Angular speed gain from target bearing to rad/s.",
-            ),
-            DeclareLaunchArgument(
-                "max_forward_speed",
-                default_value="0.25",
-                description="Maximum walking speed in m/s.",
-            ),
-            DeclareLaunchArgument(
-                "max_angular_speed",
-                default_value="0.45",
-                description="Maximum turning speed in rad/s.",
-            ),
-            DeclareLaunchArgument(
-                "max_forward_bearing_deg",
-                default_value="25.0",
-                description="Only walk forward when the target is within this bearing.",
             ),
             DeclareLaunchArgument(
                 "lidar_window_deg",
@@ -152,8 +116,8 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "waist_tracking_enabled",
-                default_value="false",
-                description="Legacy option. Keep false for body-follow mode.",
+                default_value="true",
+                description="When true, turn the torso toward visible people.",
             ),
             DeclareLaunchArgument(
                 "waist_state_topic",
@@ -202,8 +166,8 @@ def generate_launch_description():
             ),
             Node(
                 package="x2_motion_audio_tools",
-                executable="x2_person_follow",
-                name="x2_person_follow",
+                executable="x2_person_track_torso",
+                name="x2_person_track_torso",
                 output="screen",
                 parameters=[
                     {
@@ -227,24 +191,6 @@ def generate_launch_description():
                         ),
                         "stop_distance_m": ParameterValue(
                             stop_distance_m, value_type=float
-                        ),
-                        "stop_deadband_m": ParameterValue(
-                            stop_deadband_m, value_type=float
-                        ),
-                        "forward_gain": ParameterValue(
-                            forward_gain, value_type=float
-                        ),
-                        "angular_gain": ParameterValue(
-                            angular_gain, value_type=float
-                        ),
-                        "max_forward_speed": ParameterValue(
-                            max_forward_speed, value_type=float
-                        ),
-                        "max_angular_speed": ParameterValue(
-                            max_angular_speed, value_type=float
-                        ),
-                        "max_forward_bearing_deg": ParameterValue(
-                            max_forward_bearing_deg, value_type=float
                         ),
                         "lidar_window_deg": ParameterValue(
                             lidar_window_deg, value_type=float

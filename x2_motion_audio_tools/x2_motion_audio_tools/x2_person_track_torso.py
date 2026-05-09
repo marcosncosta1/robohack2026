@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Detect a person, turn with locomotion, and follow to a one-meter standoff.
+"""Detect a person with a front stereo camera, read LiDAR distance, and track them.
 
 The node logs what it receives from the camera, YOLO, and chest LiDAR. By
-default it says "Hello" when a person is first detected, registers a locomotion
-input source, turns with the legs, walks toward the selected person, and stops
-about one meter away. It does not command the waist/torso joints by default.
+default it says "Hello" when a person is first detected and uses the X2 HAL
+waist interface to turn only the torso toward the selected person.
 """
 
 from __future__ import annotations
@@ -60,7 +59,7 @@ except ImportError:
 from yolo_person_detector.yolo_wrapper import Detection, InferenceResult, YOLOWrapper
 
 
-SOURCE_NAME = "person_body_follower"
+SOURCE_NAME = "person_torso_tracker"
 DEFAULT_MODEL_PATH = "yolov8n.pt"
 TTS_SERVICE = "/aimdk_5Fmsgs/srv/PlayTts"
 
@@ -228,7 +227,7 @@ class X2PersonFollow(Node):
     """Camera plus lidar person detector/follower for the Agibot X2."""
 
     def __init__(self) -> None:
-        super().__init__("x2_person_follow")
+        super().__init__("x2_person_track_torso")
 
         self.declare_parameter("camera_topic_type", "left_rgb_image")
         self.declare_parameter("camera_topic", "")
@@ -250,23 +249,21 @@ class X2PersonFollow(Node):
         self.declare_parameter("tts_text", "Hello")
         self.declare_parameter("tts_cooldown_sec", 60.0)
         self.declare_parameter("tts_reset_after_lost_sec", 2.0)
-        self.declare_parameter("follow_enabled", True)
-        self.declare_parameter("stop_distance_m", 1.0)
-        self.declare_parameter("stop_deadband_m", 0.12)
-        self.declare_parameter("forward_gain", 0.28)
-        self.declare_parameter("angular_gain", 1.0)
-        self.declare_parameter("max_forward_speed", 0.25)
-        self.declare_parameter("min_forward_speed", 0.05)
-        self.declare_parameter("max_angular_speed", 0.45)
-        self.declare_parameter("min_angular_speed", 0.05)
-        self.declare_parameter("center_deadzone_deg", 4.0)
-        self.declare_parameter("max_forward_bearing_deg", 25.0)
-        self.declare_parameter("watchdog_timeout_sec", 0.8)
+        self.declare_parameter("follow_enabled", False)
+        self.declare_parameter("stop_distance_m", 1.2)
+        self.declare_parameter("forward_gain", 0.25)
+        self.declare_parameter("angular_gain", 1.2)
+        self.declare_parameter("max_forward_speed", 0.30)
+        self.declare_parameter("min_forward_speed", 0.20)
+        self.declare_parameter("max_angular_speed", 0.50)
+        self.declare_parameter("min_angular_speed", 0.06)
+        self.declare_parameter("center_deadzone_deg", 3.0)
+        self.declare_parameter("watchdog_timeout_sec", 0.7)
         self.declare_parameter("control_rate_hz", 50.0)
         self.declare_parameter("log_every_sec", 1.0)
         self.declare_parameter("track_same_person", True)
         self.declare_parameter("target_max_center_jump_ratio", 0.45)
-        self.declare_parameter("waist_tracking_enabled", False)
+        self.declare_parameter("waist_tracking_enabled", True)
         self.declare_parameter("waist_state_topic", "/aima/hal/joint/waist/state")
         self.declare_parameter("waist_command_topic", "/aima/hal/joint/waist/command")
         self.declare_parameter("waist_yaw_gain", 1.0)
@@ -313,7 +310,6 @@ class X2PersonFollow(Node):
         )
         self.follow_enabled = bool_param(self.get_parameter("follow_enabled").value)
         self.stop_distance_m = float(self.get_parameter("stop_distance_m").value)
-        self.stop_deadband_m = float(self.get_parameter("stop_deadband_m").value)
         self.forward_gain = float(self.get_parameter("forward_gain").value)
         self.angular_gain = float(self.get_parameter("angular_gain").value)
         self.max_forward_speed = float(self.get_parameter("max_forward_speed").value)
@@ -322,9 +318,6 @@ class X2PersonFollow(Node):
         self.min_angular_speed = float(self.get_parameter("min_angular_speed").value)
         self.center_deadzone_rad = math.radians(
             float(self.get_parameter("center_deadzone_deg").value)
-        )
-        self.max_forward_bearing_rad = math.radians(
-            float(self.get_parameter("max_forward_bearing_deg").value)
         )
         self.watchdog_timeout_sec = float(
             self.get_parameter("watchdog_timeout_sec").value
@@ -517,8 +510,8 @@ class X2PersonFollow(Node):
             f"Started in {mode}/{waist_mode} mode. camera_topic_type={self.camera_topic_type}, "
             f"camera_topic={self.camera_topic}, camera_info={self.camera_info_topic or 'none'}, "
             f"lidar_topic={self.lidar_topic}, stop_distance={self.stop_distance_m:.2f}m, "
-            f"stop_deadband={self.stop_deadband_m:.2f}m, "
-            f"max_forward_bearing={math.degrees(self.max_forward_bearing_rad):.1f}deg"
+            f"waist_limits=v{self.waist_max_velocity:.2f}/a{self.waist_max_acceleration:.2f}/j{self.waist_max_jerk:.1f}, "
+            f"waist_hold_on_lost={self.waist_hold_on_lost}"
         )
 
     def resolve_camera_topics(self) -> tuple[str, str, bool]:
@@ -991,9 +984,9 @@ class X2PersonFollow(Node):
 
     def control_loop(self) -> None:
         target = self.fresh_target()
+        self.control_waist(target)
 
         if not self.follow_enabled or not AIMDK_AVAILABLE:
-            self.publish_stop_throttled()
             return
 
         if not self.input_source_registered:
@@ -1182,18 +1175,14 @@ class X2PersonFollow(Node):
         if target.distance_m is None:
             return 0.0
 
-        if abs(target.base_bearing_rad) > self.max_forward_bearing_rad:
-            return 0.0
-
         distance_error = target.distance_m - self.stop_distance_m
-        if distance_error <= self.stop_deadband_m:
+        if distance_error <= 0.0:
             return 0.0
 
         forward_velocity = self.forward_gain * distance_error
-        forward_velocity = min(forward_velocity, self.max_forward_speed)
-        if 0.0 < forward_velocity < self.min_forward_speed:
-            return self.min_forward_speed
-        return forward_velocity
+        return self.deadband_clamp(
+            forward_velocity, self.min_forward_speed, self.max_forward_speed
+        )
 
     def deadband_clamp(self, value: float, min_abs: float, max_abs: float) -> float:
         if abs(value) < min_abs:
