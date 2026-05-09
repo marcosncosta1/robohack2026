@@ -383,7 +383,7 @@ class PersonFollowerNode(Node):
             msg.detections,
             key=lambda d: d.bbox.size_x * d.bbox.size_y,
         )
-        self._target_center_x = largest.bbox.center.x
+        self._target_center_x = largest.bbox.center.position.x
         self._target_bbox_height = largest.bbox.size_y
         self._last_detection_time = time.time()
 

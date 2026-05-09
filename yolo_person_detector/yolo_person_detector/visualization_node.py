@@ -106,8 +106,8 @@ class VisualizationNode(Node):
         if self._latest_detections is not None:
             for det in self._latest_detections.detections:
                 bbox = det.bbox
-                cx = bbox.center.x
-                cy = bbox.center.y
+                cx = bbox.center.position.x
+                cy = bbox.center.position.y
                 w = bbox.size_x
                 h = bbox.size_y
 
