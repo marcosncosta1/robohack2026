@@ -2,46 +2,62 @@
 """
 Voice Assistant Node (AWS Bedrock)
 
-Listens to microphone audio, transcribes via Bedrock (Voxtral), generates a
-response with Claude, and speaks back via the robot's TTS service.
+Listens to the AgiBot X2 microphone, transcribes via Bedrock (Voxtral), generates
+a response with Claude, and speaks back via the robot's TTS service.
 
-Audio source: /aima/hal/audio/capture (raw multi-channel PCM, 16kHz S16LE, channel 3)
+Audio source: /agent/process_audio_output (ProcessedAudioOutput, 16 kHz S16LE mono
+with built-in VAD state).
 STT: Voxtral Mini 3B (Bedrock)
 LLM: Claude Sonnet 4.6 (Bedrock)
 TTS: Robot's PlayTts service
 
 Dependencies:
-    pip install numpy boto3
+    pip install boto3
 """
 
 import base64
 import json
 import os
+import re
 import struct
 import threading
 import time
+from collections import defaultdict
+from typing import Dict, List
 
-import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
+from rclpy.qos import (
+    QoSHistoryPolicy,
+    QoSProfile,
+    QoSReliabilityPolicy,
+)
 
-from aimdk_msgs.msg import AudioCapture
+from aimdk_msgs.msg import ProcessedAudioOutput
 from aimdk_msgs.srv import PlayTts
 
 import boto3
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
+MIC_TOPIC = "/agent/process_audio_output"
 TTS_SERVICE = "/aimdk_5Fmsgs/srv/PlayTts"
-SAMPLE_RATE = 16000
-MIC_CHANNEL = 3
 
-# Energy VAD parameters
-ENERGY_THRESHOLD = 80
-SPEECH_FRAMES_MIN = 5
-SILENCE_FRAMES_END = 20
-MAX_SPEECH_FRAMES = 200
+SAMPLE_RATE = 16000
+BYTES_PER_SAMPLE = 2
+
+# VAD state values published by the X2 audio pipeline
+NO_SPEECH = 0
+SPEECH_START = 1
+SPEECHING = 2
+SPEECH_END = 3
+
+# Stream filter: 1 = onboard mic, 2 = external mic, 0 = accept any stream
+DEFAULT_STREAM_ID = int(os.environ.get("X2_MIC_STREAM_ID", "2"))
+
+# Minimum utterance length (seconds) we bother sending to STT
+MIN_UTTERANCE_SEC = 0.35
+QOS_DEPTH = 500
 
 # AWS Bedrock config
 REGION = os.environ.get("AWS_DEFAULT_REGION", "us-west-2")
@@ -54,8 +70,9 @@ SYSTEM_PROMPT = (
     "You are assisting patients in a healthcare setting."
 )
 
-# Wake keywords (any match triggers AI response)
-WAKE_KEYWORDS = ["robot", "hey robot", "hello"]
+# Wake keywords (any match triggers AI response). Set to an empty list to
+# always respond.
+WAKE_KEYWORDS: List[str] = ["robot", "hey robot", "hello"]
 
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -64,34 +81,30 @@ class VoiceAssistantNode(Node):
     def __init__(self):
         super().__init__("voice_assistant_node")
 
+        self.stream_id_filter = DEFAULT_STREAM_ID
+
         self.bedrock = boto3.client("bedrock-runtime", region_name=REGION)
 
-        # VAD state
-        self._speech_buf: list[np.ndarray] = []
-        self._silence_count = 0
-        self._speech_count = 0
-        self._recording = False
+        # Per-stream buffers driven by VAD state
+        self._buffers: Dict[int, List[bytes]] = defaultdict(list)
+        self._recording: Dict[int, bool] = defaultdict(bool)
 
-        # Thread safety
+        # Thread safety for the ASR/LLM pipeline
         self._asr_lock = threading.Lock()
         self._asr_busy = False
 
         # Mute mic during TTS playback
         self._tts_mute_until = 0.0
 
-        self.inited = False
-        self.mic_channels = 0
-        self.ref_channels = 0
-
         qos = QoSProfile(
-            history=QoSHistoryPolicy.KEEP_LAST,
-            depth=500,
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=QOS_DEPTH,
         )
 
         self.sub = self.create_subscription(
-            AudioCapture,
-            "/aima/hal/audio/capture",
+            ProcessedAudioOutput,
+            MIC_TOPIC,
             self._audio_callback,
             qos,
         )
@@ -104,78 +117,72 @@ class VoiceAssistantNode(Node):
             self.get_logger().warn("TTS service not available")
 
         self.get_logger().info(
-            f"🤖 Voice assistant started (threshold={ENERGY_THRESHOLD}), "
-            f"wake words: {WAKE_KEYWORDS}"
+            f"Voice assistant started on {MIC_TOPIC} "
+            f"(stream_id filter={self.stream_id_filter}, qos depth={QOS_DEPTH}), "
+            f"wake words: {WAKE_KEYWORDS or '<always on>'}"
         )
 
-    # ── Audio capture & energy VAD ────────────────────────────────────────────
+    # ── Audio capture (VAD-driven) ────────────────────────────────────────────
 
-    def _audio_callback(self, msg: AudioCapture):
-        if time.monotonic() < self._tts_mute_until:
+    def _audio_callback(self, msg: ProcessedAudioOutput):
+        try:
+            if time.monotonic() < self._tts_mute_until:
+                return
+
+            stream_id = int(msg.stream_id)
+            if self.stream_id_filter and stream_id != self.stream_id_filter:
+                return
+
+            vad_state = int(getattr(msg.audio_vad_state, "value", msg.audio_vad_state))
+            audio = bytes(msg.audio_data)
+
+            if vad_state == SPEECH_START:
+                self._buffers[stream_id] = [audio] if audio else []
+                self._recording[stream_id] = True
+                return
+
+            if vad_state == SPEECHING and self._recording[stream_id]:
+                if audio:
+                    self._buffers[stream_id].append(audio)
+                return
+
+            if vad_state == SPEECH_END and self._recording[stream_id]:
+                if audio:
+                    self._buffers[stream_id].append(audio)
+                pcm = b"".join(self._buffers.pop(stream_id, []))
+                self._recording[stream_id] = False
+                self._handle_utterance(pcm)
+                return
+
+            if vad_state == NO_SPEECH:
+                self._buffers.pop(stream_id, None)
+                self._recording[stream_id] = False
+        except Exception as e:
+            self.get_logger().error(f"Audio callback error: {e}")
+
+    def _handle_utterance(self, pcm: bytes):
+        duration_sec = len(pcm) / (SAMPLE_RATE * BYTES_PER_SAMPLE)
+        if duration_sec < MIN_UTTERANCE_SEC:
+            self.get_logger().debug(f"Ignoring {duration_sec:.2f}s utterance (too short)")
             return
-
-        if not self.inited:
-            self.mic_channels = msg.mic_channels
-            self.ref_channels = msg.ref_channels
-            total = self.mic_channels + self.ref_channels
-            self.get_logger().info(
-                f"Audio format: mic={self.mic_channels} ref={self.ref_channels} "
-                f"total={total} rate={SAMPLE_RATE} channel={MIC_CHANNEL}"
-            )
-            self.inited = True
-
-        raw = np.frombuffer(bytes(msg.data.data), dtype=np.int16)
-        total_ch = self.mic_channels + self.ref_channels
-        if total_ch == 0 or len(raw) % total_ch != 0:
-            return
-
-        samples = raw.reshape(-1, total_ch)
-        frame = samples[:, MIC_CHANNEL].copy()
-        rms = int(np.sqrt(np.mean(frame.astype(np.float32) ** 2)))
-
-        is_speech = rms > ENERGY_THRESHOLD
-
-        if not self._recording:
-            if is_speech:
-                self._speech_count += 1
-                self._speech_buf.append(frame)
-                if self._speech_count >= SPEECH_FRAMES_MIN:
-                    self._recording = True
-                    self._silence_count = 0
-            else:
-                self._speech_count = 0
-                self._speech_buf.clear()
-        else:
-            self._speech_buf.append(frame)
-            if is_speech:
-                self._silence_count = 0
-            else:
-                self._silence_count += 1
-
-            if (self._silence_count >= SILENCE_FRAMES_END
-                    or len(self._speech_buf) >= MAX_SPEECH_FRAMES):
-                pcm_int16 = np.concatenate(self._speech_buf).astype(np.int16)
-                self._speech_buf = []
-                self._recording = False
-                self._silence_count = 0
-                self._speech_count = 0
-                self._run_asr_async(pcm_int16)
+        self.get_logger().info(f"✅ Speech end — {duration_sec:.2f}s, processing...")
+        self._run_asr_async(pcm)
 
     # ── ASR via Bedrock Voxtral (threaded) ────────────────────────────────────
 
-    def _run_asr_async(self, pcm_int16: np.ndarray):
+    def _run_asr_async(self, pcm: bytes):
         with self._asr_lock:
             if self._asr_busy:
                 self.get_logger().warn("ASR busy, skipping")
                 return
             self._asr_busy = True
 
-        t = threading.Thread(target=self._run_asr, args=(pcm_int16,), daemon=True)
+        t = threading.Thread(target=self._run_asr, args=(pcm,), daemon=True)
         t.start()
 
-    def _run_asr(self, pcm_int16: np.ndarray):
+    def _run_asr(self, pcm: bytes):
         try:
-            text = self._transcribe(pcm_int16)
+            text = self._transcribe(pcm)
             if not text or len(text) < 2:
                 self.get_logger().debug("Transcription too short, ignoring")
                 return
@@ -187,13 +194,12 @@ class VoiceAssistantNode(Node):
             with self._asr_lock:
                 self._asr_busy = False
 
-    def _transcribe(self, pcm_int16: np.ndarray) -> str:
+    def _transcribe(self, pcm: bytes) -> str:
         """Transcribe PCM audio via Bedrock Voxtral Mini 3B."""
-        speech_bytes = pcm_int16.tobytes()
-        if len(speech_bytes) < 16000:
+        if len(pcm) < SAMPLE_RATE:  # < 0.5 s at 16 kHz mono 16-bit would be too short
             return ""
 
-        wav_data = self._pcm_to_wav(speech_bytes)
+        wav_data = self._pcm_to_wav(pcm)
         audio_b64 = base64.b64encode(wav_data).decode("utf-8")
 
         body = json.dumps({
@@ -226,15 +232,13 @@ class VoiceAssistantNode(Node):
     def _match_and_respond(self, text: str):
         lower = text.lower().strip()
 
-        # Check for wake keyword
-        if not any(kw.lower() in lower for kw in WAKE_KEYWORDS):
+        if WAKE_KEYWORDS and not any(kw.lower() in lower for kw in WAKE_KEYWORDS):
             self.get_logger().debug(f"No wake word, ignoring: {text}")
             return
 
-        # Strip wake words to get the question
         question = text
         for kw in WAKE_KEYWORDS:
-            question = question.replace(kw, "").replace(kw.lower(), "")
+            question = re.sub(re.escape(kw), "", question, flags=re.IGNORECASE)
         question = question.strip(" ,.!?")
 
         if not question:
@@ -318,7 +322,7 @@ class VoiceAssistantNode(Node):
 
     @staticmethod
     def _pcm_to_wav(pcm_data: bytes) -> bytes:
-        """Wrap raw PCM in a WAV header (16kHz, 16-bit, mono)."""
+        """Wrap raw PCM in a WAV header (16 kHz, 16-bit, mono)."""
         data_size = len(pcm_data)
         header = struct.pack(
             '<4sI4s4sIHHIIHH4sI',
