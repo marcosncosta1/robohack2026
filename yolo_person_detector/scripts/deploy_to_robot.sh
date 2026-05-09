@@ -9,9 +9,14 @@
 #   ./scripts/deploy_to_robot.sh agi@10.0.1.40 --build
 #
 # This script:
-#   1. rsync's the package to ~/ros2_ws/src/ on the robot
-#   2. Optionally builds with colcon and sources the workspace
+#   1. rsync's the package to ~/yolo_ws/src/ on the robot (separate workspace)
+#   2. Optionally builds with colcon (sourcing aimdk for aimdk_msgs)
 #   3. Installs Python dependencies (ultralytics) if not present
+#
+# Robot workspace layout:
+#   /home/agi/aimdk/           <- existing aimdk with aimdk_msgs
+#   /home/agi/yolo_ws/         <- our new workspace (created by this script)
+#       src/yolo_person_detector/
 
 set -euo pipefail
 
@@ -26,8 +31,10 @@ BUILD_FLAG="${2:-}"
 
 # Find this script's parent directory (the package root)
 PACKAGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REMOTE_WS="\$HOME/ros2_ws"
-REMOTE_SRC="\$HOME/ros2_ws/src/yolo_person_detector"
+
+# Use a separate workspace to avoid conflicts with aimdk
+REMOTE_WS="/home/agi/yolo_ws"
+REMOTE_SRC="$REMOTE_WS/src/yolo_person_detector"
 
 echo "═══════════════════════════════════════════════════════"
 echo " Deploying yolo_person_detector to $REMOTE"
@@ -64,6 +71,7 @@ if [ "$BUILD_FLAG" = "--build" ]; then
     echo "[4/4] Building package on robot..."
     ssh "$REMOTE" "bash -l -c '
         source /opt/ros/humble/setup.bash &&
+        source /home/agi/aimdk/install/setup.bash &&
         cd $REMOTE_WS &&
         colcon build --packages-select yolo_person_detector --symlink-install
     '"
@@ -79,9 +87,11 @@ echo " Deployment complete!"
 echo "═══════════════════════════════════════════════════════"
 echo ""
 echo "On the robot, run:"
+echo ""
 echo "  ssh $REMOTE"
 echo "  source /opt/ros/humble/setup.bash"
-echo "  source ~/ros2_ws/install/setup.bash"
+echo "  source /home/agi/aimdk/install/setup.bash"
+echo "  source /home/agi/yolo_ws/install/setup.bash"
 echo ""
 echo "Detection only (no robot movement):"
 echo "  ros2 launch yolo_person_detector yolo_pipeline.launch.py"

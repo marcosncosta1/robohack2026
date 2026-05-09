@@ -62,8 +62,8 @@ class CameraSelectorNode(Node):
         self.image_pub = self.create_publisher(Image, '/yolo/input_image', SENSOR_QOS)
         self.info_pub = self.create_publisher(CameraInfo, '/yolo/camera_info', SENSOR_QOS)
 
-        # Subscribe to active camera
-        self._subscriptions = {}
+        # Subscribe to active camera (use _cam_subs to avoid conflict with Node._subscriptions)
+        self._cam_subs = {}
         self._subscribe_to_camera(self.active_camera)
 
         # Timeout tracking
@@ -78,18 +78,18 @@ class CameraSelectorNode(Node):
     def _subscribe_to_camera(self, camera_name: str) -> None:
         """Subscribe to the specified camera's image and info topics."""
         # Unsubscribe from previous
-        for sub in self._subscriptions.values():
+        for sub in self._cam_subs.values():
             self.destroy_subscription(sub)
-        self._subscriptions.clear()
+        self._cam_subs.clear()
 
         topic = CAMERA_TOPICS[camera_name]
-        self._subscriptions['image'] = self.create_subscription(
+        self._cam_subs['image'] = self.create_subscription(
             Image, topic, self._image_callback, SENSOR_QOS
         )
 
         if camera_name in CAMERA_INFO_TOPICS:
             info_topic = CAMERA_INFO_TOPICS[camera_name]
-            self._subscriptions['info'] = self.create_subscription(
+            self._cam_subs['info'] = self.create_subscription(
                 CameraInfo, info_topic, self._info_callback, SENSOR_QOS
             )
 

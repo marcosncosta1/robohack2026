@@ -58,12 +58,23 @@ pytest test/ -v
 
 ## 2. Deploy to the Agibot X2
 
+### Robot workspace layout
+
+The robot has this structure:
+```
+/home/agi/aimdk/           <- existing SDK with aimdk_msgs, py_examples
+/home/agi/yolo_ws/         <- our new workspace (created by deploy script)
+    src/yolo_person_detector/
+```
+
+We use a **separate workspace** (`yolo_ws`) to avoid conflicts with the existing aimdk.
+
 ### Prerequisites on the robot
 
-- ROS2 Humble installed at `/opt/ros/humble`
-- Workspace at `~/ros2_ws` with `aimdk_msgs` built (already present on the robot)
+- ROS2 Humble at `/opt/ros/humble`
+- aimdk built at `/home/agi/aimdk/install/` (already present)
 - Python 3 with pip
-- Network access to pip for the YOLO model download (or pre-copy the `.pt` file)
+- Network access for YOLO model download (or pre-copy the `.pt` file)
 
 ### One-shot deploy (recommended)
 
@@ -76,20 +87,25 @@ cd ~/Desktop/ETH/robohack2026/yolo_person_detector
 ./scripts/deploy_to_robot.sh agi@10.0.1.40 --build
 ```
 
-This rsyncs the package to `~/ros2_ws/src/yolo_person_detector/` on the robot, pip-installs `ultralytics`, and runs `colcon build --packages-select yolo_person_detector`.
+This:
+1. Creates `/home/agi/yolo_ws/src/yolo_person_detector/` on the robot
+2. Rsyncs the package files
+3. Pip-installs `ultralytics`
+4. Runs `colcon build` (sourcing aimdk for `aimdk_msgs`)
 
 ### Manual deploy (if the script doesn't fit)
 
 ```bash
 # From your Mac
 rsync -av --exclude='__pycache__' --exclude='*.mp4' \
-    yolo_person_detector/ agi@<ROBOT_IP>:~/ros2_ws/src/yolo_person_detector/
+    yolo_person_detector/ agi@10.0.1.40:/home/agi/yolo_ws/src/yolo_person_detector/
 
 # On the robot
-ssh agi@<ROBOT_IP>
+ssh agi@10.0.1.40
 pip3 install --user ultralytics opencv-python numpy
 source /opt/ros/humble/setup.bash
-cd ~/ros2_ws
+source /home/agi/aimdk/install/setup.bash   # for aimdk_msgs
+cd /home/agi/yolo_ws
 colcon build --packages-select yolo_person_detector --symlink-install
 source install/setup.bash
 ```
@@ -98,12 +114,13 @@ source install/setup.bash
 
 ## 3. Running on the robot
 
-Always SSH in first and source the environments:
+SSH in and source **all three** environments:
 
 ```bash
-ssh agi@<ROBOT_IP>
+ssh agi@10.0.1.40
 source /opt/ros/humble/setup.bash
-source ~/ros2_ws/install/setup.bash
+source /home/agi/aimdk/install/setup.bash    # for aimdk_msgs + py_examples
+source /home/agi/yolo_ws/install/setup.bash  # for yolo_person_detector
 ```
 
 ### A. Detection only (safe, robot will not move)
@@ -211,8 +228,11 @@ All parameters are tunable in `config/yolo_params.yaml` → `person_follower`:
 ## 5. Troubleshooting
 
 **"aimdk_msgs not available"**
-The follower node is running outside the robot's workspace. Source it:
-`source ~/ros2_ws/install/setup.bash`
+You forgot to source the aimdk workspace. Run:
+```bash
+source /home/agi/aimdk/install/setup.bash
+source /home/agi/yolo_ws/install/setup.bash
+```
 
 **Robot doesn't move even with follower_enabled:=true**
 The robot isn't in locomotion mode. Run `ros2 run py_examples set_mc_action LD` first.
@@ -224,8 +244,10 @@ Use `device:=cuda` if the robot has an NVIDIA GPU, or switch to a smaller model 
 **YOLO model download fails on the robot**
 If the robot has no internet, download `yolov8n.pt` on your Mac first and copy it:
 ```bash
-scp ~/.cache/ultralytics/yolov8n.pt agi@<ROBOT_IP>:~/ros2_ws/src/yolo_person_detector/
-# Then launch with model:=./yolov8n.pt
+# On Mac (downloads to cache if not present)
+python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
+scp ~/.cache/ultralytics/yolov8n.pt agi@10.0.1.40:/home/agi/yolo_ws/src/yolo_person_detector/
+# Then launch with model:=/home/agi/yolo_ws/src/yolo_person_detector/yolov8n.pt
 ```
 
 **Camera not publishing anything**
