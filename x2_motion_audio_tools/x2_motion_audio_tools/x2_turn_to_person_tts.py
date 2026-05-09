@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""Rotate the X2 waist/torso toward a person and say "On my way".
+"""Say "On my way", then rotate waist_yaw_joint using the AimDK example pattern.
 
-This version follows the AimDK joint-control example pattern:
-  - creates a dedicated waist joint controller
-  - uses Ruckig to generate the waist trajectory
-  - publishes JointCommandArray to /aima/hal/joint/waist/command
-
-It does not publish locomotion velocity, so it should not step the legs.
+This intentionally mirrors the official robot joint control example as closely
+as possible, but creates only the waist controller and sets waist_yaw_joint from
+the supplied angle.
 """
 
 from __future__ import annotations
@@ -17,7 +14,9 @@ import signal
 import sys
 import time
 from dataclasses import dataclass
-from typing import Optional
+from enum import Enum
+from threading import Lock
+from typing import Dict, List, Optional
 
 import rclpy
 import rclpy.logging
@@ -35,14 +34,14 @@ except ImportError:
 
 SOURCE_NAME = "turn_to_person_tts"
 
-SUBSCRIBER_QOS = QoSProfile(
+subscriber_qos = QoSProfile(
     reliability=ReliabilityPolicy.BEST_EFFORT,
     history=HistoryPolicy.KEEP_LAST,
     depth=10,
     durability=DurabilityPolicy.VOLATILE,
 )
 
-PUBLISHER_QOS = QoSProfile(
+publisher_qos = QoSProfile(
     reliability=ReliabilityPolicy.RELIABLE,
     history=HistoryPolicy.KEEP_LAST,
     depth=10,
@@ -50,7 +49,11 @@ PUBLISHER_QOS = QoSProfile(
 )
 
 
-@dataclass(frozen=True)
+class JointArea(Enum):
+    WAIST = "WAIST"
+
+
+@dataclass
 class JointInfo:
     name: str
     lower_limit: float
@@ -59,12 +62,13 @@ class JointInfo:
     kd: float
 
 
-WAIST_JOINTS = [
-    JointInfo("waist_yaw_joint", -3.43, 2.382, 20.0, 4.0),
-    JointInfo("waist_pitch_joint", -0.314, 0.314, 20.0, 4.0),
-    JointInfo("waist_roll_joint", -0.488, 0.488, 20.0, 4.0),
-]
-WAIST_YAW_INDEX = 0
+robot_model: Dict[JointArea, List[JointInfo]] = {
+    JointArea.WAIST: [
+        JointInfo("waist_yaw_joint", -3.43, 2.382, 20.0, 4.0),
+        JointInfo("waist_pitch_joint", -0.314, 0.314, 20.0, 4.0),
+        JointInfo("waist_roll_joint", -0.488, 0.488, 20.0, 4.0),
+    ],
+}
 
 
 def clamp(value: float, lower: float, upper: float) -> float:
@@ -94,7 +98,6 @@ class PlayTtsClient(Node):
         self.client = self.create_client(PlayTts, "/aimdk_5Fmsgs/srv/PlayTts")
 
     def say(self, text: str) -> bool:
-        self.get_logger().info("Waiting for TTS service...")
         while not self.client.wait_for_service(timeout_sec=2.0):
             self.get_logger().info("TTS service unavailable, waiting...")
 
@@ -118,15 +121,11 @@ class PlayTtsClient(Node):
             rclpy.spin_until_future_complete(self, future, timeout_sec=0.25)
             if future.done():
                 break
-            self.get_logger().info(f"Retrying TTS request... [{attempt + 1}/8]")
+            self.get_logger().info(f"Retrying TTS request... [{attempt}]")
 
-        if future is None or not future.done():
-            self.get_logger().error("TTS service call timed out.")
-            return False
-
-        response = future.result()
+        response = future.result() if future is not None and future.done() else None
         if response is None:
-            self.get_logger().error("TTS service returned no response.")
+            self.get_logger().error("TTS service call failed or timed out.")
             return False
 
         if response.tts_resp.is_success:
@@ -137,219 +136,103 @@ class PlayTtsClient(Node):
         return False
 
 
-class WaistJointController(Node):
+class JointControllerNode(Node):
+    """Waist controller copied from the AimDK joint-control example."""
+
     def __init__(
         self,
-        waist_state_topic: str,
-        waist_command_topic: str,
+        node_name: str,
+        sub_topic: str,
+        pub_topic: str,
+        area: JointArea,
+        dofs: int,
         control_period_sec: float,
-        waist_soft_limit_deg: float,
-        max_velocity: float,
-        max_acceleration: float,
-        max_jerk: float,
-        command_kp: float,
-        command_kd: float,
     ) -> None:
-        super().__init__("x2_turn_to_person_tts_waist")
+        super().__init__(node_name)
         if ruckig is None:
             raise ImportError(
-                "ruckig is required for waist joint control. Install it on the "
-                "robot with: python3 -m pip install ruckig"
+                "ruckig is required. Install it on the robot with: "
+                "python3 -m pip install ruckig"
             )
 
-        self.joint_info = WAIST_JOINTS
-        self.dofs = len(WAIST_JOINTS)
-        self.control_period_sec = control_period_sec
-        self.ruckig = ruckig.Ruckig(self.dofs, control_period_sec)
-        self.input = ruckig.InputParameter(self.dofs)
-        self.output = ruckig.OutputParameter(self.dofs)
+        self.lock = Lock()
+        self.joint_info = robot_model[area]
+        self.dofs = dofs
+        self.ruckig = ruckig.Ruckig(dofs, control_period_sec)
+        self.input = ruckig.InputParameter(dofs)
+        self.output = ruckig.OutputParameter(dofs)
+        self.ruckig_initialized = False
 
-        self.input.current_position = [0.0] * self.dofs
-        self.input.current_velocity = [0.0] * self.dofs
-        self.input.current_acceleration = [0.0] * self.dofs
-        self.input.max_velocity = [max_velocity] * self.dofs
-        self.input.max_acceleration = [max_acceleration] * self.dofs
-        self.input.max_jerk = [max_jerk] * self.dofs
-        self.command_kp = command_kp
-        self.command_kd = command_kd
+        self.input.current_position = [0.0] * dofs
+        self.input.current_velocity = [0.0] * dofs
+        self.input.current_acceleration = [0.0] * dofs
+        self.input.max_velocity = [1.0] * dofs
+        self.input.max_acceleration = [1.0] * dofs
+        self.input.max_jerk = [25.0] * dofs
 
-        yaw_joint = WAIST_JOINTS[WAIST_YAW_INDEX]
-        soft_limit_rad = math.radians(waist_soft_limit_deg)
-        if soft_limit_rad > 0.0:
-            self.waist_yaw_lower_limit = max(yaw_joint.lower_limit, -soft_limit_rad)
-            self.waist_yaw_upper_limit = min(yaw_joint.upper_limit, soft_limit_rad)
-        else:
-            self.waist_yaw_lower_limit = yaw_joint.lower_limit
-            self.waist_yaw_upper_limit = yaw_joint.upper_limit
-
-        self.state_received = False
         self.sub = self.create_subscription(
             JointStateArray,
-            waist_state_topic,
+            sub_topic,
             self.joint_state_callback,
-            SUBSCRIBER_QOS,
+            subscriber_qos,
         )
         self.pub = self.create_publisher(
             JointCommandArray,
-            waist_command_topic,
-            PUBLISHER_QOS,
-        )
-        self.get_logger().info(
-            f"Using waist state={waist_state_topic}, command={waist_command_topic}"
+            pub_topic,
+            publisher_qos,
         )
 
-    def joint_state_callback(self, msg: JointStateArray) -> None:
-        positions = self.positions_from_state(msg)
-        if positions is None:
-            return
+    def joint_state_callback(self, _msg: JointStateArray) -> None:
+        self.ruckig_initialized = True
 
-        if not self.state_received:
-            self.input.current_position = positions
-            self.input.current_velocity = self.velocities_from_state(msg)
-            self.input.current_acceleration = [0.0] * self.dofs
-            self.state_received = True
+    def control_callback(self, joint_idx: int) -> None:
+        while self.ruckig.update(self.input, self.output) in [
+            ruckig.Result.Working,
+            ruckig.Result.Finished,
+        ]:
+            self.input.current_position = self.output.new_position
+            self.input.current_velocity = self.output.new_velocity
+            self.input.current_acceleration = self.output.new_acceleration
 
-    def positions_from_state(self, msg: JointStateArray) -> Optional[list[float]]:
-        by_name = {joint.name: joint for joint in msg.joints}
-        if all(joint.name in by_name for joint in self.joint_info):
-            return [by_name[joint.name].position for joint in self.joint_info]
-
-        if len(msg.joints) >= self.dofs:
-            return [msg.joints[i].position for i in range(self.dofs)]
-
-        return None
-
-    def velocities_from_state(self, msg: JointStateArray) -> list[float]:
-        by_name = {joint.name: joint for joint in msg.joints}
-        if all(joint.name in by_name for joint in self.joint_info):
-            return [by_name[joint.name].velocity for joint in self.joint_info]
-
-        if len(msg.joints) >= self.dofs:
-            return [msg.joints[i].velocity for i in range(self.dofs)]
-
-        return [0.0] * self.dofs
-
-    def capture_state_briefly(self, seconds: float) -> None:
-        deadline = time.monotonic() + seconds
-        while rclpy.ok() and time.monotonic() < deadline:
-            if self.state_received:
-                return
-            rclpy.spin_once(self, timeout_sec=0.02)
-
-        self.get_logger().warn(
-            "No waist state received before command; using zero waist pose as "
-            "the Ruckig start state, matching the SDK joint-control example."
-        )
-
-    def set_waist_yaw_target(
-        self,
-        yaw_target_rad: float,
-        relative_from_current: bool,
-        hold_seconds: float,
-    ) -> None:
-        target = list(self.input.current_position)
-        if not self.state_received:
-            target = [0.0] * self.dofs
-
-        if relative_from_current:
-            yaw_target_rad = target[WAIST_YAW_INDEX] + yaw_target_rad
-
-        yaw_target_rad = clamp(
-            yaw_target_rad,
-            self.waist_yaw_lower_limit,
-            self.waist_yaw_upper_limit,
-        )
-        target[WAIST_YAW_INDEX] = yaw_target_rad
-        target[1] = clamp(target[1], self.joint_info[1].lower_limit, self.joint_info[1].upper_limit)
-        target[2] = clamp(target[2], self.joint_info[2].lower_limit, self.joint_info[2].upper_limit)
-
-        self.input.target_position = target
-        self.input.target_velocity = [0.0] * self.dofs
-        self.input.target_acceleration = [0.0] * self.dofs
-
-        self.get_logger().info(
-            f"Commanding waist_yaw_joint to {math.degrees(yaw_target_rad):+.1f} deg"
-        )
-        self.control_to_target(WAIST_YAW_INDEX)
-        self.hold_target(hold_seconds)
-
-    def control_to_target(self, joint_idx: int) -> None:
-        last_publish = time.monotonic()
-
-        while rclpy.ok():
-            result = self.ruckig.update(self.input, self.output)
-            if result not in [ruckig.Result.Working, ruckig.Result.Finished]:
-                raise RuntimeError(f"Ruckig trajectory generation failed: {result}")
-
-            self.input.current_position = list(self.output.new_position)
-            self.input.current_velocity = list(self.output.new_velocity)
-            self.input.current_acceleration = list(self.output.new_acceleration)
-
-            self.publish_command(
-                list(self.output.new_position),
-                list(self.output.new_velocity),
-            )
-            rclpy.spin_once(self, timeout_sec=0.0)
-
-            current = self.output.new_position[joint_idx]
-            target = self.input.target_position[joint_idx]
-            if result == ruckig.Result.Finished:
-                self.get_logger().info(
-                    f"Waist target reached: error={abs(current - target):.5f} rad"
-                )
+            tolerance = 1e-6
+            current_p = self.output.new_position[joint_idx]
+            if abs(current_p - self.input.target_position[joint_idx]) < tolerance:
                 break
 
-            elapsed = time.monotonic() - last_publish
-            if elapsed < self.control_period_sec:
-                time.sleep(self.control_period_sec - elapsed)
-            last_publish = time.monotonic()
+            cmd = JointCommandArray()
+            for i, joint_info in enumerate(self.joint_info):
+                joint = JointCommand()
+                joint.name = joint_info.name
+                joint.position = clamp(
+                    self.output.new_position[i],
+                    joint_info.lower_limit,
+                    joint_info.upper_limit,
+                )
+                joint.velocity = self.output.new_velocity[i]
+                joint.effort = 0.0
+                joint.stiffness = joint_info.kp
+                joint.damping = joint_info.kd
+                cmd.joints.append(joint)
 
-        self.publish_command(
-            list(self.input.target_position),
-            [0.0] * self.dofs,
-        )
+            self.pub.publish(cmd)
 
-    def hold_target(self, hold_seconds: float) -> None:
-        if hold_seconds <= 0.0:
-            return
+    def set_target_position(self, joint_name: str, position: float) -> None:
+        target_positions = [0.0] * self.dofs
+        joint_idx = 0
+        for i, joint in enumerate(self.joint_info):
+            if joint.name == joint_name:
+                target_positions[i] = clamp(position, joint.lower_limit, joint.upper_limit)
+                joint_idx = i
 
-        self.get_logger().info(f"Holding final waist target for {hold_seconds:.2f} s")
-        end_time = time.monotonic() + hold_seconds
-        target = list(self.input.target_position)
-        zero_velocity = [0.0] * self.dofs
-        while rclpy.ok() and time.monotonic() < end_time:
-            self.publish_command(target, zero_velocity)
-            rclpy.spin_once(self, timeout_sec=0.0)
-            time.sleep(self.control_period_sec)
-
-    def publish_command(self, positions: list[float], velocities: list[float]) -> None:
-        cmd = JointCommandArray()
-        for i, joint_info in enumerate(self.joint_info):
-            joint = JointCommand()
-            joint.name = joint_info.name
-            joint.position = clamp(
-                positions[i],
-                self.limit_for_joint(i)[0],
-                self.limit_for_joint(i)[1],
-            )
-            joint.velocity = velocities[i]
-            joint.effort = 0.0
-            joint.stiffness = self.command_kp
-            joint.damping = self.command_kd
-            cmd.joints.append(joint)
-
-        self.pub.publish(cmd)
-
-    def limit_for_joint(self, index: int) -> tuple[float, float]:
-        joint = self.joint_info[index]
-        if index == WAIST_YAW_INDEX:
-            return self.waist_yaw_lower_limit, self.waist_yaw_upper_limit
-        return joint.lower_limit, joint.upper_limit
+        self.input.target_position = target_positions
+        self.input.target_velocity = [0.0] * self.dofs
+        self.input.target_acceleration = [0.0] * self.dofs
+        self.control_callback(joint_idx)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description='Rotate the torso toward a person and say "On my way".'
+        description='Say "On my way", then set waist_yaw_joint to the input angle.'
     )
     parser.add_argument(
         "positional_distance_m",
@@ -361,12 +244,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "positional_angle_deg",
         nargs="?",
         type=float,
-        help="Bearing to person in degrees, positive left.",
+        help="Waist yaw target in degrees, positive left.",
     )
     parser.add_argument("--distance-m", type=float, default=None)
     parser.add_argument("--angle-deg", type=float, default=None)
     parser.add_argument("--text", default="On my way")
-    parser.add_argument("--waist-soft-limit-deg", type=float, default=90.0)
     parser.add_argument(
         "--waist-state-topic",
         default="/aima/hal/joint/waist/state",
@@ -376,25 +258,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default="/aima/hal/joint/waist/command",
     )
     parser.add_argument(
-        "--relative-from-current",
-        action="store_true",
-        help="Add the input angle to the current waist yaw instead of using it as an absolute yaw target.",
-    )
-    parser.add_argument(
         "--invert-waist-direction",
         "--invert-turn-direction",
         dest="invert_waist_direction",
         action="store_true",
-        help="Use this if positive angle turns the torso the wrong way.",
     )
     parser.add_argument("--control-period-sec", type=float, default=0.002)
-    parser.add_argument("--state-wait-sec", type=float, default=0.5)
-    parser.add_argument("--hold-seconds", type=float, default=1.5)
-    parser.add_argument("--waist-max-velocity", type=float, default=0.35)
-    parser.add_argument("--waist-max-acceleration", type=float, default=0.25)
-    parser.add_argument("--waist-max-jerk", type=float, default=3.0)
-    parser.add_argument("--waist-kp", type=float, default=16.0)
-    parser.add_argument("--waist-kd", type=float, default=4.0)
+    parser.add_argument(
+        "--settle-sec",
+        type=float,
+        default=0.5,
+        help="Short delay after creating the waist publisher/subscriber.",
+    )
     parser.add_argument("--skip-tts", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
@@ -412,7 +287,7 @@ def resolve_distance_and_angle(args: argparse.Namespace) -> tuple[float, float]:
     if angle is None:
         if distance is None:
             distance = prompt_float("Distance to person in meters", default=0.0)
-        angle = prompt_float("Angle to person in degrees, positive left")
+        angle = prompt_float("Waist yaw target in degrees, positive left")
     elif distance is None:
         distance = 0.0
 
@@ -424,20 +299,8 @@ def resolve_distance_and_angle(args: argparse.Namespace) -> tuple[float, float]:
 def validate_args(args: argparse.Namespace) -> None:
     if args.control_period_sec <= 0.0:
         raise ValueError("--control-period-sec must be > 0.")
-    if args.state_wait_sec < 0.0:
-        raise ValueError("--state-wait-sec must be >= 0.")
-    if args.hold_seconds < 0.0:
-        raise ValueError("--hold-seconds must be >= 0.")
-    if args.waist_max_velocity <= 0.0:
-        raise ValueError("--waist-max-velocity must be > 0.")
-    if args.waist_max_acceleration <= 0.0:
-        raise ValueError("--waist-max-acceleration must be > 0.")
-    if args.waist_max_jerk <= 0.0:
-        raise ValueError("--waist-max-jerk must be > 0.")
-    if args.waist_kp <= 0.0:
-        raise ValueError("--waist-kp must be > 0.")
-    if args.waist_kd < 0.0:
-        raise ValueError("--waist-kd must be >= 0.")
+    if args.settle_sec < 0.0:
+        raise ValueError("--settle-sec must be >= 0.")
 
 
 def main(args=None) -> int:
@@ -450,32 +313,26 @@ def main(args=None) -> int:
         yaw_target_rad = -yaw_target_rad
 
     if parsed.dry_run:
-        mode = "relative" if parsed.relative_from_current else "absolute"
         print(
             f"Plan: distance={distance_m:.2f}m, "
-            f"waist_yaw_target={math.degrees(yaw_target_rad):+.1f}deg, "
-            f"mode={mode}, vmax={parsed.waist_max_velocity:.2f}rad/s, "
-            f"amax={parsed.waist_max_acceleration:.2f}rad/s^2, "
-            f"jerk={parsed.waist_max_jerk:.1f}rad/s^3, text={parsed.text!r}"
+            f"waist_yaw_joint={math.degrees(yaw_target_rad):+.1f}deg, "
+            f"text={parsed.text!r}"
         )
         return 0
 
     rclpy.init()
     speaker = PlayTtsClient()
-    waist = WaistJointController(
-        waist_state_topic=parsed.waist_state_topic,
-        waist_command_topic=parsed.waist_command_topic,
-        control_period_sec=parsed.control_period_sec,
-        waist_soft_limit_deg=parsed.waist_soft_limit_deg,
-        max_velocity=parsed.waist_max_velocity,
-        max_acceleration=parsed.waist_max_acceleration,
-        max_jerk=parsed.waist_max_jerk,
-        command_kp=parsed.waist_kp,
-        command_kd=parsed.waist_kd,
+    waist_node = JointControllerNode(
+        "waist_node",
+        parsed.waist_state_topic,
+        parsed.waist_command_topic,
+        JointArea.WAIST,
+        3,
+        parsed.control_period_sec,
     )
 
     def signal_handler(sig, _frame):
-        waist.get_logger().info(f"Received signal {sig}; stopping.")
+        waist_node.get_logger().info(f"Received signal {sig}; stopping.")
         if rclpy.ok():
             rclpy.shutdown()
 
@@ -489,12 +346,11 @@ def main(args=None) -> int:
         if not parsed.skip_tts:
             speaker.say(parsed.text)
 
-        waist.capture_state_briefly(parsed.state_wait_sec)
-        waist.set_waist_yaw_target(
-            yaw_target_rad=yaw_target_rad,
-            relative_from_current=parsed.relative_from_current,
-            hold_seconds=parsed.hold_seconds,
-        )
+        end_time = time.monotonic() + parsed.settle_sec
+        while rclpy.ok() and time.monotonic() < end_time:
+            rclpy.spin_once(waist_node, timeout_sec=0.02)
+
+        waist_node.set_target_position("waist_yaw_joint", yaw_target_rad)
         return 0
     except KeyboardInterrupt:
         return 130
@@ -505,7 +361,7 @@ def main(args=None) -> int:
         return 1
     finally:
         speaker.destroy_node()
-        waist.destroy_node()
+        waist_node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
 
