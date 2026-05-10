@@ -113,7 +113,7 @@ class X2StereoPersonFollow(Node):
         self.declare_parameter("control_rate_hz", 20.0)
         self.declare_parameter("reverse_enabled", False)
         self.declare_parameter("invert_angular", False)
-        self.declare_parameter("require_waist_neutral_for_forward", True)
+        self.declare_parameter("require_waist_neutral_for_forward", False)
         self.declare_parameter("waist_neutral_limit_deg", 5.0)
         self.declare_parameter("waist_state_timeout_sec", 0.5)
 
@@ -184,13 +184,14 @@ class X2StereoPersonFollow(Node):
             callback_group=self.cb_group,
         )
         if AIMDK_AVAILABLE:
-            self.create_subscription(
-                JointStateArray,
-                self.waist_state_topic,
-                self.waist_state_callback,
-                SENSOR_QOS,
-                callback_group=self.cb_group,
-            )
+            if self.require_waist_neutral_for_forward:
+                self.create_subscription(
+                    JointStateArray,
+                    self.waist_state_topic,
+                    self.waist_state_callback,
+                    SENSOR_QOS,
+                    callback_group=self.cb_group,
+                )
             self.velocity_pub = self.create_publisher(
                 McLocomotionVelocity,
                 "/aima/mc/locomotion/velocity",
@@ -228,6 +229,7 @@ class X2StereoPersonFollow(Node):
             "Stereo person follow started: "
             f"enabled={self.enabled}, dry_run={self.dry_run}, "
             f"auto_enable_stable_stand={self.auto_enable_stable_stand}, "
+            f"require_waist_neutral={self.require_waist_neutral_for_forward}, "
             f"target_topic={self.target_topic}, stop_band=[{self.stop_min_m:.2f}, "
             f"{self.stop_max_m:.2f}]m, max_v={self.max_forward_speed:.2f}m/s, "
             f"max_w={self.max_angular_speed:.2f}rad/s"
@@ -412,28 +414,28 @@ class X2StereoPersonFollow(Node):
     def compute_velocity(self) -> tuple[float, float, str]:
         now = time.monotonic()
         if self.target is None:
-            return 0.0, 0.0, "no_target"
+            return 0.0, 0.0, "NO_TARGET"
 
         target_age = now - self.target.stamp_sec
         if target_age > self.target_timeout_sec:
-            return 0.0, 0.0, "target_timeout"
+            return 0.0, 0.0, "NO_TARGET"
 
         z_m = self.target.z_m
         if z_m < self.min_valid_depth_m or z_m > self.max_valid_depth_m:
-            return 0.0, 0.0, "invalid_depth"
+            return 0.0, 0.0, "INVALID_DEPTH"
 
         bearing_rad = math.atan2(self.target.x_m, z_m)
         angular = self.angular_velocity_for_bearing(bearing_rad)
 
         waist_neutral = self.waist_is_neutral(now)
         if not waist_neutral:
-            return 0.0, angular, "waist_not_neutral"
+            return 0.0, angular, "WAIST_NOT_NEUTRAL"
 
         if abs(bearing_rad) > self.max_forward_bearing_rad:
-            return 0.0, angular, "turning_to_center"
+            return 0.0, angular, "ALIGN"
 
         if self.stop_min_m <= z_m <= self.stop_max_m:
-            return 0.0, angular, "inside_stop_band"
+            return 0.0, angular, "STOP_BAND"
 
         if z_m > self.stop_max_m:
             distance_error = z_m - self.target_distance_m
@@ -443,7 +445,7 @@ class X2StereoPersonFollow(Node):
                 self.max_forward_speed,
             )
             forward = self.apply_min_velocity(forward, self.min_forward_speed)
-            return forward, angular, "approaching"
+            return forward, angular, "APPROACH"
 
         if z_m < self.stop_min_m and self.reverse_enabled:
             distance_error = self.target_distance_m - z_m
@@ -453,9 +455,9 @@ class X2StereoPersonFollow(Node):
                 self.max_reverse_speed,
             )
             reverse = -self.apply_min_velocity(abs(reverse), self.min_forward_speed)
-            return reverse, angular, "reversing"
+            return reverse, angular, "REVERSE"
 
-        return 0.0, angular, "too_close_stop"
+        return 0.0, angular, "TOO_CLOSE"
 
     def angular_velocity_for_bearing(self, bearing_rad: float) -> float:
         if abs(bearing_rad) < self.center_deadzone_rad:

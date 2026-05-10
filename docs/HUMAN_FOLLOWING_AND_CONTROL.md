@@ -1,7 +1,7 @@
 # Human Following And Control Context
 
 This document is the working context for future agents and teammates building on
-the stereo vision, head tracking, torso tracking, and locomotion-following work.
+the stereo vision, head tracking, and locomotion-following work.
 
 ## Architecture
 
@@ -22,8 +22,8 @@ joint command topics. Walking uses the motion-controller locomotion API:
 
 - Head yaw tracking: `x2_head_yaw_tracker`.
 - Head keyboard teleop: `x2_head_keyboard_teleop`.
-- Waist yaw tracking: `x2_waist_yaw_tracker`.
-- Waist keyboard teleop: `x2_waist_keyboard_teleop`.
+- Waist yaw tracking: `x2_waist_yaw_tracker`, proof-of-concept only.
+- Waist keyboard teleop: `x2_waist_keyboard_teleop`, proof-of-concept only.
 - Stereo target walking supervisor: `x2_stereo_person_follow`.
 
 The walking supervisor consumes the stereo target point and publishes
@@ -36,10 +36,11 @@ Use the high-level locomotion controller for anything that steps the legs. The
 known smooth walking examples and vendor demos go through the motion-controller
 stack. Do not implement walking by sending raw leg joint commands.
 
-Use low-level HAL joint commands for upper-body tracking and teleop only. For
-head, waist, arms, wrists, and hands, command smooth trajectories initialized
-from the live joint state. The head and waist nodes use Ruckig when available
-and fall back to velocity-limited interpolation if Ruckig is missing.
+Use low-level HAL joint commands for upper-body tracking and teleop only when
+the current motion mode does not already own those joints. In `SD`
+(`STAND_DEFAULT`), the controller owns the torso/body joints for balance, so the
+walking demo must not command waist/torso HAL joints. Head HAL control is still
+acceptable because `SD` does not command the head.
 
 When commanding a joint group, publish the whole command array for that group
 and explicitly hold the joints that are not being moved. This prevents
@@ -52,19 +53,12 @@ future hands, wrists, and arms.
 
 ## Walking Integration
 
-Head, torso, and legs can run at the same time, but the responsibilities should
-stay separate:
+The `SD` walking demo is head-plus-base only:
 
-- Head tracks fast visual error.
-- Waist tracking is optional and bounded.
-- Base yaw handles large heading corrections during walking.
-- Forward walking is blocked unless the waist is close to neutral.
-
-The torso "null point" is waist yaw near zero. During follow mode, the waist
-should either be disabled or limited to small offsets. The walking supervisor
-has `require_waist_neutral_for_forward:=true` by default and blocks forward
-velocity unless `abs(waist_yaw_joint)` is within
-`waist_neutral_limit_deg:=5.0`.
+- Head tracks fast visual error to keep the person in view.
+- Base yaw handles body-facing direction.
+- Forward velocity handles approach distance.
+- Waist/torso tracking must stay off during the walking demo.
 
 The first stereo walking behavior is intentionally conservative:
 
@@ -91,16 +85,6 @@ Head tracking with vision:
 ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py device:=cuda
 ```
 
-Head plus bounded torso tracking:
-
-```bash
-ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
-  device:=cuda \
-  torso_enabled:=true \
-  waist_soft_limit_deg:=10.0 \
-  waist_start_threshold_deg:=12.0
-```
-
 Gantry dry-run follow. This logs computed walking velocity but does not publish
 locomotion commands:
 
@@ -111,18 +95,19 @@ ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
   follow_dry_run:=true
 ```
 
-Gantry active follow. Put the robot in Stable Stand first and release the
-remote-controller channel if required by the platform workflow:
+Gantry active follow. Put the robot in Stable Stand first. If the robot image
+does not expose an `rc` app, do not run `aima em stop-app rc`; use
+`get_current_input_source` to inspect arbitration instead.
 
 ```bash
 ros2 run py_examples set_mc_action SD
-aima em stop-app rc
 
 ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
   device:=cuda \
   follow_enabled:=true \
   follow_dry_run:=false \
   follow_max_forward_speed:=0.10 \
+  follow_min_forward_speed:=0.10 \
   follow_max_angular_speed:=0.20
 ```
 
@@ -136,6 +121,7 @@ ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
   follow_dry_run:=false \
   follow_auto_enable_stable_stand:=true \
   follow_max_forward_speed:=0.10 \
+  follow_min_forward_speed:=0.10 \
   follow_max_angular_speed:=0.20
 ```
 
@@ -153,11 +139,12 @@ and that `point.z` changes correctly as a person approaches.
 
 Then run the follow supervisor in dry-run mode. Check logs:
 
-- Person centered and farther than `1.0 m`: `approaching`.
-- Person inside `0.5-1.0 m`: `inside_stop_band`.
-- Person off center: `turning_to_center`.
-- Waist not neutral: `waist_not_neutral`.
-- Lost target: `target_timeout`.
+- Person centered and farther than `1.0 m`: `APPROACH`.
+- Person inside `0.5-1.0 m`: `STOP_BAND`.
+- Person off center: `ALIGN`.
+- Target too close: `TOO_CLOSE`.
+- Lost target: `NO_TARGET`.
+- Bad depth: `INVALID_DEPTH`.
 
 Only after dry-run output is correct should locomotion be enabled on the gantry.
 Use low speed limits first. The robot should walk in place on the gantry while
@@ -181,6 +168,6 @@ stereo supervisor should be the path for the camera-depth follow experiment.
 The existing smooth walking examples are already using the correct interface:
 high-level locomotion velocity through the motion controller.
 
-The torso should not be treated as the primary way to aim the robot during
-walking. Use it for small alignment and interaction motion. Use base yaw for
-large heading changes.
+The torso must not be controlled by our HAL waist nodes during `SD` walking.
+That causes a conflict with the balance controller. Use base yaw for all
+body-facing corrections and keep torso tools separate from the walking demo.

@@ -125,16 +125,17 @@ ros2 run x2_motion_audio_tools x2_turn_to_person_tts \
   --angle-deg FACE_ANGLE
 ```
 
-## Stereo Head, Waist, and Walking Follow
+## Stereo Head and Walking Follow
 
 The current stereo interaction stack is launched from
 `x2_stereo_head_track.launch.py`. It starts the stereo vision pipeline, head yaw
-tracker, optional waist yaw tracker, and the stereo walking supervisor.
+tracker, and the stereo walking supervisor. It does not start torso control:
+`SD` owns the torso/body joints for balance, and commanding waist HAL joints at
+the same time can cause vibration.
 
 Default behavior is safe:
 
 - Head tracking is enabled.
-- Waist tracking is disabled unless `torso_enabled:=true`.
 - Walking follow is disabled unless `follow_enabled:=true`.
 - Walking follow is dry-run unless `follow_dry_run:=false`.
 
@@ -142,16 +143,6 @@ Head tracking only:
 
 ```bash
 ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py device:=cuda
-```
-
-Head plus bounded waist tracking:
-
-```bash
-ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
-  device:=cuda \
-  torso_enabled:=true \
-  waist_soft_limit_deg:=10.0 \
-  waist_start_threshold_deg:=12.0
 ```
 
 Gantry dry-run walking follow:
@@ -167,13 +158,13 @@ Active gantry follow:
 
 ```bash
 ros2 run py_examples set_mc_action SD
-aima em stop-app rc
 
 ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
   device:=cuda \
   follow_enabled:=true \
   follow_dry_run:=false \
   follow_max_forward_speed:=0.10 \
+  follow_min_forward_speed:=0.10 \
   follow_max_angular_speed:=0.20
 ```
 
@@ -187,6 +178,7 @@ ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
   follow_dry_run:=false \
   follow_auto_enable_stable_stand:=true \
   follow_max_forward_speed:=0.10 \
+  follow_min_forward_speed:=0.10 \
   follow_max_angular_speed:=0.20
 ```
 
@@ -197,10 +189,8 @@ It never commands leg joints directly. It consumes
 only when the person is centered and farther than the stop band, and stops in
 the `0.5-1.0 m` range by default.
 
-Forward walking is blocked while the waist is away from neutral by default:
-`follow_require_waist_neutral:=true` and
-`follow_waist_neutral_limit_deg:=5.0`. This keeps torso offsets from becoming a
-stability problem while the gait controller is stepping.
+The old waist tracking tools are still available as proof-of-concept utilities,
+but do not run them during the `SD` walking demo.
 
 Runtime enable and disable:
 
@@ -221,11 +211,12 @@ the legs, walks toward the selected person, and stops about one meter away. It
 does not command the waist/torso joints by default.
 
 Before running, put the robot in Stable Stand and release the remote-controller
-channel:
+channel if your robot image exposes one. On images without an `rc` app, skip
+the `aima em stop-app rc` command and check input-source arbitration instead.
 
 ```bash
 ros2 run py_examples set_mc_action SD
-aima em stop-app rc
+ros2 run py_examples get_current_input_source
 ```
 
 Run body following:
