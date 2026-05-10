@@ -16,6 +16,11 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 try:
+    import ruckig
+except ImportError:
+    ruckig = None
+
+try:
     from aimdk_msgs.msg import (
         JointCommand,
         JointCommandArray,
@@ -97,8 +102,11 @@ class X2HeadKeyboardTeleop(Node):
         self.declare_parameter("dry_run", False)
         self.declare_parameter("yaw_step_deg", 2.0)
         self.declare_parameter("pitch_step_deg", 2.0)
-        self.declare_parameter("max_velocity", 0.12)
-        self.declare_parameter("control_rate_hz", 30.0)
+        self.declare_parameter("use_ruckig", True)
+        self.declare_parameter("max_velocity", 1.0)
+        self.declare_parameter("max_acceleration", 1.0)
+        self.declare_parameter("max_jerk", 25.0)
+        self.declare_parameter("control_rate_hz", 500.0)
         self.declare_parameter("soft_yaw_limit_deg", 20.0)
         self.declare_parameter("soft_pitch_limit_deg", 18.0)
         self.declare_parameter("publish_hold", True)
@@ -108,7 +116,10 @@ class X2HeadKeyboardTeleop(Node):
         self.dry_run = bool_param(self.get_parameter("dry_run").value)
         self.yaw_step_rad = self.deg_param("yaw_step_deg")
         self.pitch_step_rad = self.deg_param("pitch_step_deg")
+        self.use_ruckig = bool_param(self.get_parameter("use_ruckig").value)
         self.max_velocity = float(self.get_parameter("max_velocity").value)
+        self.max_acceleration = float(self.get_parameter("max_acceleration").value)
+        self.max_jerk = float(self.get_parameter("max_jerk").value)
         control_rate_hz = float(self.get_parameter("control_rate_hz").value)
         self.control_period_sec = 1.0 / max(control_rate_hz, 0.1)
         self.publish_hold = bool_param(self.get_parameter("publish_hold").value)
@@ -123,11 +134,37 @@ class X2HeadKeyboardTeleop(Node):
         )
 
         self.head_positions: Optional[list[float]] = None
+        self.head_velocities: Optional[list[float]] = None
         self.command_positions: Optional[list[float]] = None
         self.target_positions: Optional[list[float]] = None
+        self.ruckig_controller = None
+        self.ruckig_input = None
+        self.ruckig_output = None
+        self.ruckig_initialized = False
         self.last_state_warning = 0.0
         self.last_dry_run_log = 0.0
+        self.last_ruckig_warning = 0.0
         self.should_exit = False
+
+        if self.use_ruckig:
+            if ruckig is None:
+                self.get_logger().warn(
+                    "ruckig is not installed; using velocity-limited fallback."
+                )
+                self.use_ruckig = False
+            else:
+                self.ruckig_controller = ruckig.Ruckig(
+                    len(HEAD_JOINTS), self.control_period_sec
+                )
+                self.ruckig_input = ruckig.InputParameter(len(HEAD_JOINTS))
+                self.ruckig_output = ruckig.OutputParameter(len(HEAD_JOINTS))
+                self.ruckig_input.max_velocity = [self.max_velocity] * len(
+                    HEAD_JOINTS
+                )
+                self.ruckig_input.max_acceleration = [
+                    self.max_acceleration
+                ] * len(HEAD_JOINTS)
+                self.ruckig_input.max_jerk = [self.max_jerk] * len(HEAD_JOINTS)
 
         self.create_subscription(
             JointStateArray,
@@ -147,7 +184,8 @@ class X2HeadKeyboardTeleop(Node):
         self.get_logger().info(
             "Head keyboard teleop started: "
             f"state={self.head_state_topic}, command={self.head_command_topic}, "
-            f"dry_run={self.dry_run}"
+            f"dry_run={self.dry_run}, use_ruckig={self.use_ruckig}, "
+            f"period={self.control_period_sec:.4f}s"
         )
 
     def deg_param(self, name: str) -> float:
@@ -183,9 +221,17 @@ class X2HeadKeyboardTeleop(Node):
             self.head_positions = [
                 float(by_name[joint.name].position) for joint in HEAD_JOINTS
             ]
+            self.head_velocities = [
+                float(getattr(by_name[joint.name], "velocity", 0.0))
+                for joint in HEAD_JOINTS
+            ]
         elif len(msg.joints) >= len(HEAD_JOINTS):
             self.head_positions = [
                 float(msg.joints[i].position) for i in range(len(HEAD_JOINTS))
+            ]
+            self.head_velocities = [
+                float(getattr(msg.joints[i], "velocity", 0.0))
+                for i in range(len(HEAD_JOINTS))
             ]
         else:
             return
@@ -195,6 +241,27 @@ class X2HeadKeyboardTeleop(Node):
             self.command_positions = list(self.head_positions)
         if self.target_positions is None:
             self.target_positions = list(self.head_positions)
+        if self.use_ruckig and not self.ruckig_initialized:
+            self.initialize_ruckig()
+
+    def initialize_ruckig(self) -> None:
+        if (
+            self.ruckig_input is None
+            or self.head_positions is None
+            or self.head_velocities is None
+        ):
+            return
+
+        self.ruckig_input.current_position = list(self.head_positions)
+        self.ruckig_input.current_velocity = list(self.head_velocities)
+        self.ruckig_input.current_acceleration = [0.0] * len(HEAD_JOINTS)
+        self.ruckig_input.target_position = list(
+            self.target_positions or self.head_positions
+        )
+        self.ruckig_input.target_velocity = [0.0] * len(HEAD_JOINTS)
+        self.ruckig_input.target_acceleration = [0.0] * len(HEAD_JOINTS)
+        self.ruckig_initialized = True
+        self.get_logger().info("Ruckig head trajectory initialized from joint state.")
 
     def keyboard_loop(self) -> None:
         key = read_key()
@@ -251,11 +318,57 @@ class X2HeadKeyboardTeleop(Node):
         if self.target_positions is None:
             return
 
-        next_positions, velocities = self.next_head_step(self.target_positions)
+        if self.use_ruckig:
+            next_positions, velocities = self.next_ruckig_step(self.target_positions)
+        else:
+            next_positions, velocities = self.next_head_step(self.target_positions)
         moving = any(abs(vel) > 1e-6 for vel in velocities)
         if moving or self.publish_hold:
             self.publish_head_command(next_positions, velocities)
         self.command_positions = list(next_positions)
+
+    def next_ruckig_step(
+        self, target_positions: list[float]
+    ) -> tuple[list[float], list[float]]:
+        if (
+            self.ruckig_controller is None
+            or self.ruckig_input is None
+            or self.ruckig_output is None
+            or not self.ruckig_initialized
+        ):
+            return self.next_head_step(target_positions)
+
+        self.ruckig_input.target_position = self.clamp_head_positions(
+            target_positions
+        )
+        self.ruckig_input.target_velocity = [0.0] * len(HEAD_JOINTS)
+        self.ruckig_input.target_acceleration = [0.0] * len(HEAD_JOINTS)
+        self.ruckig_input.max_velocity = [self.max_velocity] * len(HEAD_JOINTS)
+        self.ruckig_input.max_acceleration = [self.max_acceleration] * len(
+            HEAD_JOINTS
+        )
+        self.ruckig_input.max_jerk = [self.max_jerk] * len(HEAD_JOINTS)
+
+        result = self.ruckig_controller.update(
+            self.ruckig_input, self.ruckig_output
+        )
+        if result not in [ruckig.Result.Working, ruckig.Result.Finished]:
+            now = time.monotonic()
+            if now - self.last_ruckig_warning > 3.0:
+                self.last_ruckig_warning = now
+                self.get_logger().warn(
+                    "Ruckig head trajectory failed; using velocity-limited fallback."
+                )
+            return self.next_head_step(target_positions)
+
+        positions = self.clamp_head_positions(list(self.ruckig_output.new_position))
+        velocities = list(self.ruckig_output.new_velocity)
+        self.ruckig_input.current_position = positions
+        self.ruckig_input.current_velocity = velocities
+        self.ruckig_input.current_acceleration = list(
+            self.ruckig_output.new_acceleration
+        )
+        return positions, velocities
 
     def next_head_step(
         self, target_positions: list[float]
