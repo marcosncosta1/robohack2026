@@ -14,6 +14,7 @@ setup(
             [
                 "launch/x2_person_follow.launch.py",
                 "launch/x2_person_track_torso.launch.py",
+                "launch/x2_stereo_head_track.launch.py",
             ],
         ),
     ],
@@ -33,6 +34,8 @@ setup(
             "x2_turn_to_person_tts = x2_motion_audio_tools.x2_turn_to_person_tts:main",
             "x2_person_follow = x2_motion_audio_tools.x2_person_follow:main",
             "x2_person_track_torso = x2_motion_audio_tools.x2_person_track_torso:main",
+            "x2_head_yaw_tracker = x2_motion_audio_tools.x2_head_yaw_tracker:main",
+            "x2_head_keyboard_teleop = x2_motion_audio_tools.x2_head_keyboard_teleop:main",
             "x2_forward_back_raise_arms = x2_motion_audio_tools.x2_forward_back_raise_arms:main",
             "x2_forward_backward_steps = x2_motion_audio_tools.x2_forward_backward_steps:main",
         ],

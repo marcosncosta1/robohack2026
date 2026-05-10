@@ -12,6 +12,7 @@ from typing import Dict, Optional
 import cv2
 import numpy as np
 import rclpy
+from geometry_msgs.msg import PointStamped
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CameraInfo, CompressedImage
@@ -81,6 +82,7 @@ class StereoFinalAnnotatorNode(Node):
         self.declare_parameter(
             "output_topic", "/stereo_person/final_annotated_image/compressed"
         )
+        self.declare_parameter("target_point_topic", "/stereo_person/target_point")
         self.declare_parameter("inference_time_topic", "/stereo_person/inference_time")
         self.declare_parameter("jpeg_quality", 75)
         self.declare_parameter("output_width", 960)
@@ -166,6 +168,11 @@ class StereoFinalAnnotatorNode(Node):
         self.output_pub = self.create_publisher(
             CompressedImage, self.output_topic, SENSOR_QOS
         )
+        self.target_point_pub = self.create_publisher(
+            PointStamped,
+            self.get_parameter("target_point_topic").value,
+            RELIABLE_QOS,
+        )
         self.inference_pub = self.create_publisher(
             Float32, self.get_parameter("inference_time_topic").value, RELIABLE_QOS
         )
@@ -211,6 +218,7 @@ class StereoFinalAnnotatorNode(Node):
             right_proc = self._resize_like(right, left_proc)
             depths = self._estimate_depths(left_proc, right_proc, detections, scale)
         detections, depths = self._select_closest_detection(detections, depths)
+        self._publish_target_point(depths.get(0), msg.header)
 
         annotated = self._annotate(
             left, detections, depths, result.inference_time_ms
@@ -595,6 +603,17 @@ class StereoFinalAnnotatorNode(Node):
         msg = Float32()
         msg.data = float(inference_time_ms)
         self.inference_pub.publish(msg)
+
+    def _publish_target_point(self, depth: Optional[DepthEstimate], header) -> None:
+        if depth is None:
+            return
+
+        msg = PointStamped()
+        msg.header = header
+        msg.point.x = float(depth.x_m)
+        msg.point.y = float(depth.y_m)
+        msg.point.z = float(depth.z_m)
+        self.target_point_pub.publish(msg)
 
     def _jpeg_quality(self) -> int:
         quality = int(self.get_parameter("jpeg_quality").value)

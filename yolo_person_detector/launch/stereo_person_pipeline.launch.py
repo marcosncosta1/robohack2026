@@ -12,6 +12,7 @@ def generate_launch_description():
     left_camera_info_topic = LaunchConfiguration("left_camera_info_topic")
     right_camera_info_topic = LaunchConfiguration("right_camera_info_topic")
     output_topic = LaunchConfiguration("output_topic")
+    target_point_topic = LaunchConfiguration("target_point_topic")
     device = LaunchConfiguration("device")
     model = LaunchConfiguration("model")
     confidence = LaunchConfiguration("confidence")
@@ -50,6 +51,11 @@ def generate_launch_description():
                 "output_topic",
                 default_value="/stereo_person/final_annotated_image/compressed",
                 description="Final annotated compressed JPEG output topic",
+            ),
+            DeclareLaunchArgument(
+                "target_point_topic",
+                default_value="/stereo_person/target_point",
+                description="Closest valid person center point in the left camera frame",
             ),
             DeclareLaunchArgument(
                 "device",
@@ -118,6 +124,7 @@ def generate_launch_description():
                         "left_camera_info_topic": left_camera_info_topic,
                         "right_camera_info_topic": right_camera_info_topic,
                         "output_topic": output_topic,
+                        "target_point_topic": target_point_topic,
                         "device": device,
                         "model_path": model,
                         "confidence_threshold": confidence,

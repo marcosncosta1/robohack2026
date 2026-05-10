@@ -12,6 +12,7 @@
   <depend>rclpy</depend>
   <depend>aimdk_msgs</depend>
   <depend>cv_bridge</depend>
+  <depend>geometry_msgs</depend>
   <depend>launch_ros</depend>
   <depend>sensor_msgs</depend>
   <depend>sensor_msgs_py</depend>
