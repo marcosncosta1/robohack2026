@@ -483,10 +483,23 @@ class X2StereoPersonFollow(Node):
         self.update_assist_state(reason)
         if self.assist_wait_active():
             forward, angular, reason = 0.0, 0.0, "ASSIST_WAIT"
+            self.log_throttled(reason, forward, angular)
+            # Intentionally do NOT publish velocity here. Keeping the publish
+            # stream alive holds our MC input source, which causes the MC to
+            # reject preset-motion requests (e.g. the arm emote). Letting the
+            # input source time out during the assist wait is required for the
+            # preset path to be accepted.
+            return
 
         self.log_throttled(reason, forward, angular)
 
         if self.dry_run:
+            return
+
+        if not self.registered_input_source:
+            # Our input source timed out during assist wait. It will be
+            # re-registered by the background thread spawned in
+            # expire_assist_wait(); skip publishing until that completes.
             return
 
         self.publish_velocity(forward, angular)
@@ -618,7 +631,27 @@ class X2StereoPersonFollow(Node):
         if time.monotonic() < self.assist_wait_until:
             return
         self.assist_wait_until = 0.0
-        self.get_logger().info("Timed assist wait complete; resuming normal follow.")
+        # The MC will have timed out our input source during the assist wait
+        # (we deliberately stopped publishing velocity). Re-register before the
+        # control loop resumes so the next velocity command is honored.
+        if not self.dry_run:
+            self.registered_input_source = False
+            threading.Thread(
+                target=self._reregister_input_source, daemon=True
+            ).start()
+        self.get_logger().info(
+            "Timed assist wait complete; re-registering input source and "
+            "resuming normal follow."
+        )
+
+    def _reregister_input_source(self) -> None:
+        if self.register_input_source():
+            self.registered_input_source = True
+        else:
+            self.get_logger().error(
+                "Failed to re-register input source after assist wait; "
+                "follow will stay stopped until re-registration succeeds."
+            )
 
     def start_arm_pose_trigger(self) -> None:
         if not self.arm_pose_trigger_enabled:
@@ -667,6 +700,18 @@ class X2StereoPersonFollow(Node):
                 "SetMcPresetMotion service unavailable; arm preset skipped."
             )
             return
+
+        # The MC rejects preset-motion requests when an application input
+        # source is actively holding locomotion. control_loop() stops
+        # publishing velocity during the assist wait; pause here so the MC's
+        # input-source timeout (1 s) can actually fire before we call the
+        # service.
+        pre_call_delay_sec = 1.5
+        self.get_logger().info(
+            f"Waiting {pre_call_delay_sec:.1f}s for input-source timeout "
+            "before sending preset motion..."
+        )
+        time.sleep(pre_call_delay_sec)
 
         req = SetMcPresetMotion.Request()
         req.header = RequestHeader()
