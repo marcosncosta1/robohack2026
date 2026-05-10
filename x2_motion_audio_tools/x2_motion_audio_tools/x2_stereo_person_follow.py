@@ -142,7 +142,7 @@ class X2StereoPersonFollow(Node):
         self.declare_parameter("arm_pose_preset_motion_id", 1010)
         self.declare_parameter("assist_wait_seconds", 7.0)
         self.declare_parameter("announce_enabled", False)
-        self.declare_parameter("announce_startup_text", "I'm on my way")
+        self.declare_parameter("announce_startup_text", "Hi, I am Elderbot, I'll be on my way to assist you!")
         self.declare_parameter("announce_startup_emoji_id", 90)
         self.declare_parameter("announce_emoji_mode", 1)
         self.declare_parameter("announce_tts_priority", 6)
