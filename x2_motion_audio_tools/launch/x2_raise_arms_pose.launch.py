@@ -22,8 +22,13 @@ def generate_launch_description():
     move_damping = LaunchConfiguration("move_damping")
     hold_stiffness = LaunchConfiguration("hold_stiffness")
     hold_damping = LaunchConfiguration("hold_damping")
+    require_no_other_arm_publishers = LaunchConfiguration(
+        "require_no_other_arm_publishers"
+    )
     require_balanced_mode = LaunchConfiguration("require_balanced_mode")
+    require_balanced_status = LaunchConfiguration("require_balanced_status")
     control_hz = LaunchConfiguration("control_hz")
+    arm_state_timeout_s = LaunchConfiguration("arm_state_timeout_s")
 
     return LaunchDescription(
         [
@@ -58,8 +63,19 @@ def generate_launch_description():
             DeclareLaunchArgument("move_damping", default_value="0.8"),
             DeclareLaunchArgument("hold_stiffness", default_value="8.0"),
             DeclareLaunchArgument("hold_damping", default_value="0.8"),
+            DeclareLaunchArgument(
+                "require_no_other_arm_publishers",
+                default_value="true",
+                description="Abort if another node is already publishing arm HAL commands.",
+            ),
             DeclareLaunchArgument("require_balanced_mode", default_value="true"),
+            DeclareLaunchArgument(
+                "require_balanced_status",
+                default_value="false",
+                description="When true, require GetMcAction status value 100.",
+            ),
             DeclareLaunchArgument("control_hz", default_value="200.0"),
+            DeclareLaunchArgument("arm_state_timeout_s", default_value="5.0"),
             Node(
                 package="x2_motion_audio_tools",
                 executable="x2_raise_arms_pose",
@@ -100,10 +116,19 @@ def generate_launch_description():
                         "hold_damping": ParameterValue(
                             hold_damping, value_type=float
                         ),
+                        "require_no_other_arm_publishers": ParameterValue(
+                            require_no_other_arm_publishers, value_type=bool
+                        ),
                         "require_balanced_mode": ParameterValue(
                             require_balanced_mode, value_type=bool
                         ),
+                        "require_balanced_status": ParameterValue(
+                            require_balanced_status, value_type=bool
+                        ),
                         "control_hz": ParameterValue(control_hz, value_type=float),
+                        "arm_state_timeout_s": ParameterValue(
+                            arm_state_timeout_s, value_type=float
+                        ),
                     },
                 ],
             ),

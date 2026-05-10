@@ -118,6 +118,7 @@ class X2StereoPersonFollow(Node):
         self.declare_parameter(
             "arm_pose_trigger_topic", "/x2/assist/raise_arms_trigger"
         )
+        self.declare_parameter("arm_pose_trigger_duration_sec", 2.0)
         self.declare_parameter("require_waist_neutral_for_forward", False)
         self.declare_parameter("waist_neutral_limit_deg", 5.0)
         self.declare_parameter("waist_state_timeout_sec", 0.5)
@@ -164,6 +165,9 @@ class X2StereoPersonFollow(Node):
         self.arm_pose_trigger_topic = str(
             self.get_parameter("arm_pose_trigger_topic").value
         )
+        self.arm_pose_trigger_duration_sec = float(
+            self.get_parameter("arm_pose_trigger_duration_sec").value
+        )
         self.require_waist_neutral_for_forward = bool_param(
             self.get_parameter("require_waist_neutral_for_forward").value
         )
@@ -183,6 +187,7 @@ class X2StereoPersonFollow(Node):
         self.last_log_time = 0.0
         self.last_stop_publish_time = 0.0
         self.arm_pose_triggered = False
+        self.arm_pose_trigger_active_until = 0.0
 
         if not AIMDK_AVAILABLE and not self.dry_run:
             self.get_logger().fatal(
@@ -531,21 +536,30 @@ class X2StereoPersonFollow(Node):
                 self.get_logger().warn(f"Failed to publish velocity: {exc}")
 
     def maybe_trigger_arm_pose(self, reason: str) -> None:
-        if (
-            not self.arm_pose_trigger_enabled
-            or self.arm_pose_triggered
-            or self.dry_run
-            or reason not in {"STOP_BAND", "TOO_CLOSE"}
-        ):
+        if not self.arm_pose_trigger_enabled or self.dry_run:
             return
 
+        now = time.monotonic()
+        if self.arm_pose_trigger_active_until > now:
+            self.publish_arm_pose_trigger()
+            return
+
+        if self.arm_pose_triggered or reason not in {"STOP_BAND", "TOO_CLOSE"}:
+            return
+
+        self.arm_pose_triggered = True
+        self.arm_pose_trigger_active_until = (
+            now + max(0.1, self.arm_pose_trigger_duration_sec)
+        )
+        self.get_logger().info(
+            f"Starting one-shot arm pose trigger on {self.arm_pose_trigger_topic}"
+        )
+        self.publish_arm_pose_trigger()
+
+    def publish_arm_pose_trigger(self) -> None:
         msg = Bool()
         msg.data = True
         self.arm_pose_trigger_pub.publish(msg)
-        self.arm_pose_triggered = True
-        self.get_logger().info(
-            f"Published one-shot arm pose trigger on {self.arm_pose_trigger_topic}"
-        )
 
     def publish_stop(self) -> None:
         now = time.monotonic()

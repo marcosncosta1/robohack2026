@@ -16,5 +16,6 @@ x2_raise_arms_pose:
     hold_damping: 0.8
     require_no_other_arm_publishers: true
     require_balanced_mode: true
+    require_balanced_status: false
     control_hz: 200.0
     arm_state_timeout_s: 5.0

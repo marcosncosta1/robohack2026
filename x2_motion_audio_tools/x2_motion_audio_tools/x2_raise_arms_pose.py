@@ -124,6 +124,7 @@ class RaiseArmsPose(Node):
         self.declare_parameter("hold_damping", 0.8)
         self.declare_parameter("require_no_other_arm_publishers", True)
         self.declare_parameter("require_balanced_mode", True)
+        self.declare_parameter("require_balanced_status", False)
         self.declare_parameter("control_hz", 200.0)
         self.declare_parameter("arm_state_timeout_s", 5.0)
 
@@ -148,6 +149,9 @@ class RaiseArmsPose(Node):
         )
         self.require_balanced_mode = bool_param(
             self.get_parameter("require_balanced_mode").value
+        )
+        self.require_balanced_status = bool_param(
+            self.get_parameter("require_balanced_status").value
         )
         self.control_hz = float(self.get_parameter("control_hz").value)
         self.arm_state_timeout_s = float(self.get_parameter("arm_state_timeout_s").value)
@@ -213,6 +217,7 @@ class RaiseArmsPose(Node):
 
     def _trigger_callback(self, msg: Bool) -> None:
         if msg.data:
+            self.get_logger().info("Received arm pose activate trigger.")
             self.start_pose_thread()
         else:
             self.get_logger().info("Received arm pose deactivate trigger.")
@@ -228,6 +233,7 @@ class RaiseArmsPose(Node):
 
         self.has_started_once = True
         self.cancel_event.clear()
+        self.get_logger().info("Starting arm pose routine.")
         self.active_thread = threading.Thread(target=self.run_pose, daemon=True)
         self.active_thread.start()
 
@@ -268,11 +274,16 @@ class RaiseArmsPose(Node):
             return False
 
         mode, status = mode_status
-        if status != MC_ACTION_RUNNING:
+        if status != MC_ACTION_RUNNING and self.require_balanced_status:
             self.get_logger().error(
                 f"Motion mode {mode} is not running yet (status={status})."
             )
             return False
+        if status != MC_ACTION_RUNNING:
+            self.get_logger().warn(
+                f"Motion mode {mode} reported status={status}; continuing because "
+                "require_balanced_status=false."
+            )
         if mode in BALANCED_MOTION_MODES:
             return True
 

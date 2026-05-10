@@ -71,6 +71,9 @@ def generate_launch_description():
     assist_arm_pose_trigger_topic = LaunchConfiguration(
         "assist_arm_pose_trigger_topic"
     )
+    assist_arm_pose_trigger_duration_sec = LaunchConfiguration(
+        "assist_arm_pose_trigger_duration_sec"
+    )
     assist_arm_shoulder_pitch_deg = LaunchConfiguration(
         "assist_arm_shoulder_pitch_deg"
     )
@@ -359,6 +362,11 @@ def generate_launch_description():
                 description="Bool topic used to trigger the assist arm pose.",
             ),
             DeclareLaunchArgument(
+                "assist_arm_pose_trigger_duration_sec",
+                default_value="2.0",
+                description="Seconds to repeatedly publish the one-shot arm trigger.",
+            ),
+            DeclareLaunchArgument(
                 "assist_arm_shoulder_pitch_deg",
                 default_value="10.0",
                 description="Assist pose shoulder pitch in degrees.",
@@ -505,6 +513,9 @@ def generate_launch_description():
                             assist_arm_pose_enabled, value_type=bool
                         ),
                         "arm_pose_trigger_topic": assist_arm_pose_trigger_topic,
+                        "arm_pose_trigger_duration_sec": ParameterValue(
+                            assist_arm_pose_trigger_duration_sec, value_type=float
+                        ),
                         "target_timeout_sec": ParameterValue(
                             target_timeout_sec, value_type=float
                         ),
