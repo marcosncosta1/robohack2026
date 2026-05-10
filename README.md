@@ -2,7 +2,7 @@
 
 Real-time person detection and follow-me behavior for the Agibot X2 humanoid robot, built on YOLOv8 and ROS2 Humble.
 
-**This repo contains the `yolo_person_detector` ROS2 package.** On the robot, clone it into `~/ros2_ws/src/robohack2026/` and build with `colcon`.
+**This repo contains the `yolo_person_detector` and `x2_motion_audio_tools` ROS2 packages.** On the robot, clone it into `~/ros2_ws/src/robohack2026/` and build with `colcon`.
 
 ## What's in the box
 
@@ -12,11 +12,13 @@ Real-time person detection and follow-me behavior for the Agibot X2 humanoid rob
 | `yolo_detector_node` | Runs YOLOv8 person detection, publishes bboxes + annotated image |
 | `visualization_node` | Overlays detections on camera frames for monitoring (rqt / web video) |
 | `person_follower_node` | Visual-servoing follower: robot centers on & approaches the detected person |
+| `stereo_final_annotator_node` | Stereo YOLO + depth pipeline that publishes annotated images and a 3D person target point |
 
-Two launch files:
+Core launch files:
 
 - `yolo_pipeline.launch.py` — **detection only** (robot does not move)
 - `yolo_follower.launch.py` — **detection + active following** (robot moves!)
+- `stereo_person_pipeline.launch.py` — **stereo detection + 3D target point** (robot does not move)
 
 ---
 
@@ -154,7 +156,8 @@ ros2 run rqt_image_view rqt_image_view /yolo/detection_image
 
 This uses the front stereo head compressed JPEG pair, runs YOLO on the left
 image, adds best-effort stereo depth labels, and publishes one final compressed
-JPEG stream:
+JPEG stream. It also publishes the selected person's 3D bbox-center estimate on
+`/stereo_person/target_point` as `geometry_msgs/PointStamped`:
 
 ```bash
 ros2 launch yolo_person_detector stereo_person_pipeline.launch.py \
@@ -169,6 +172,7 @@ Monitor the final stream on the robot:
 
 ```bash
 ros2 topic hz /stereo_person/final_annotated_image/compressed --qos-reliability best_effort
+ros2 topic echo /stereo_person/target_point
 ```
 
 On your laptop, after ROS networking is pointed at the robot:
@@ -184,6 +188,11 @@ ros2 launch yolo_person_detector stereo_person_pipeline.launch.py \
     device:=cuda \
     baseline_m:=0.06
 ```
+
+The target point is the perception contract used by the X2 head, waist, and
+stereo walking supervisor in `x2_motion_audio_tools`. See
+`docs/HUMAN_FOLLOWING_AND_CONTROL.md` for the current control standards and
+gantry/off-gantry workflow.
 
 ### C. Person follower (robot WILL move)
 

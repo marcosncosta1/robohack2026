@@ -37,6 +37,8 @@ setup(
             "x2_head_yaw_tracker = x2_motion_audio_tools.x2_head_yaw_tracker:main",
             "x2_head_keyboard_teleop = x2_motion_audio_tools.x2_head_keyboard_teleop:main",
             "x2_waist_yaw_tracker = x2_motion_audio_tools.x2_waist_yaw_tracker:main",
+            "x2_waist_keyboard_teleop = x2_motion_audio_tools.x2_waist_keyboard_teleop:main",
+            "x2_stereo_person_follow = x2_motion_audio_tools.x2_stereo_person_follow:main",
             "x2_forward_back_raise_arms = x2_motion_audio_tools.x2_forward_back_raise_arms:main",
             "x2_forward_backward_steps = x2_motion_audio_tools.x2_forward_backward_steps:main",
         ],

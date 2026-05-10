@@ -1,11 +1,13 @@
 # X2 Motion and Audio Tools
 
 ROS 2 helper nodes for AgiBot X2 audio, speech, open-loop coordinate motion,
-forward/backward movement, torso person tracking, and cautious arm raising.
+forward/backward movement, head and torso person tracking, stereo target
+following, and cautious arm raising.
 
-This package is intentionally separate from `yolo_person_detector` so the
-existing detection and follower code remains unchanged. The torso tracker reuses
-that package's YOLO wrapper, but commands only the X2 HAL waist joint by default.
+This package is intentionally separate from `yolo_person_detector`. Stereo
+vision publishes `/stereo_person/target_point`; this package consumes that
+target for head tracking, optional torso tracking, and conservative high-level
+locomotion following.
 
 ## Build
 
@@ -123,6 +125,80 @@ ros2 run x2_motion_audio_tools x2_turn_to_person_tts \
   --angle-deg FACE_ANGLE
 ```
 
+## Stereo Head, Waist, and Walking Follow
+
+The current stereo interaction stack is launched from
+`x2_stereo_head_track.launch.py`. It starts the stereo vision pipeline, head yaw
+tracker, optional waist yaw tracker, and the stereo walking supervisor.
+
+Default behavior is safe:
+
+- Head tracking is enabled.
+- Waist tracking is disabled unless `torso_enabled:=true`.
+- Walking follow is disabled unless `follow_enabled:=true`.
+- Walking follow is dry-run unless `follow_dry_run:=false`.
+
+Head tracking only:
+
+```bash
+ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py device:=cuda
+```
+
+Head plus bounded waist tracking:
+
+```bash
+ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
+  device:=cuda \
+  torso_enabled:=true \
+  waist_soft_limit_deg:=10.0 \
+  waist_start_threshold_deg:=12.0
+```
+
+Gantry dry-run walking follow:
+
+```bash
+ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
+  device:=cuda \
+  follow_enabled:=true \
+  follow_dry_run:=true
+```
+
+Active gantry follow:
+
+```bash
+ros2 run py_examples set_mc_action LD
+aima em stop-app rc
+
+ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
+  device:=cuda \
+  follow_enabled:=true \
+  follow_dry_run:=false \
+  follow_max_forward_speed:=0.10 \
+  follow_max_angular_speed:=0.20
+```
+
+The stereo walking supervisor publishes high-level
+`aimdk_msgs/McLocomotionVelocity` commands on `/aima/mc/locomotion/velocity`.
+It never commands leg joints directly. It consumes
+`/stereo_person/target_point`, rotates the base toward the target, walks forward
+only when the person is centered and farther than the stop band, and stops in
+the `0.5-1.0 m` range by default.
+
+Forward walking is blocked while the waist is away from neutral by default:
+`follow_require_waist_neutral:=true` and
+`follow_waist_neutral_limit_deg:=5.0`. This keeps torso offsets from becoming a
+stability problem while the gait controller is stepping.
+
+Runtime enable and disable:
+
+```bash
+ros2 topic pub -1 /stereo_person/follow/enable std_msgs/Bool "data: true"
+ros2 topic pub -1 /stereo_person/follow/enable std_msgs/Bool "data: false"
+```
+
+If the base turns away from the person, relaunch with
+`follow_invert_angular:=true`.
+
 ## Person Body Following
 
 `x2_person_follow` runs YOLO person detection on either top front stereo camera,
@@ -204,6 +280,21 @@ The previous torso-only tracker is preserved as `x2_person_track_torso`:
 
 ```bash
 ros2 launch x2_motion_audio_tools x2_person_track_torso.launch.py follow_enabled:=false
+```
+
+## Control Standards
+
+Use high-level locomotion velocity for walking. Do not command walking through
+raw leg joint targets.
+
+Use Ruckig-shaped HAL joint commands for head, waist, arms, wrists, and hands.
+Initialize from live joint state, publish the full command array for the joint
+group, and explicitly hold joints that are not being moved.
+
+The detailed architecture, findings, and gantry/off-gantry workflow are in:
+
+```bash
+docs/HUMAN_FOLLOWING_AND_CONTROL.md
 ```
 
 ## Forward, Backward, and Arms

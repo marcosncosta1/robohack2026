@@ -55,6 +55,27 @@ def generate_launch_description():
     waist_hold_on_lost = LaunchConfiguration("waist_hold_on_lost")
     waist_invert_yaw = LaunchConfiguration("waist_invert_yaw")
     waist_soft_limit_deg = LaunchConfiguration("waist_soft_limit_deg")
+    follow_enabled = LaunchConfiguration("follow_enabled")
+    follow_dry_run = LaunchConfiguration("follow_dry_run")
+    follow_auto_enable_locomotion = LaunchConfiguration("follow_auto_enable_locomotion")
+    follow_target_distance_m = LaunchConfiguration("follow_target_distance_m")
+    follow_stop_min_m = LaunchConfiguration("follow_stop_min_m")
+    follow_stop_max_m = LaunchConfiguration("follow_stop_max_m")
+    follow_max_forward_speed = LaunchConfiguration("follow_max_forward_speed")
+    follow_max_angular_speed = LaunchConfiguration("follow_max_angular_speed")
+    follow_forward_gain = LaunchConfiguration("follow_forward_gain")
+    follow_angular_gain = LaunchConfiguration("follow_angular_gain")
+    follow_center_deadzone_deg = LaunchConfiguration("follow_center_deadzone_deg")
+    follow_max_forward_bearing_deg = LaunchConfiguration(
+        "follow_max_forward_bearing_deg"
+    )
+    follow_control_rate_hz = LaunchConfiguration("follow_control_rate_hz")
+    follow_reverse_enabled = LaunchConfiguration("follow_reverse_enabled")
+    follow_invert_angular = LaunchConfiguration("follow_invert_angular")
+    follow_require_waist_neutral = LaunchConfiguration("follow_require_waist_neutral")
+    follow_waist_neutral_limit_deg = LaunchConfiguration(
+        "follow_waist_neutral_limit_deg"
+    )
 
     return LaunchDescription(
         [
@@ -288,6 +309,91 @@ def generate_launch_description():
                 default_value="35.0",
                 description="Symmetric waist yaw software limit.",
             ),
+            DeclareLaunchArgument(
+                "follow_enabled",
+                default_value="false",
+                description="When true, enable high-level locomotion following.",
+            ),
+            DeclareLaunchArgument(
+                "follow_dry_run",
+                default_value="true",
+                description="When true, log computed walking commands without publishing.",
+            ),
+            DeclareLaunchArgument(
+                "follow_auto_enable_locomotion",
+                default_value="false",
+                description="When true, request LOCOMOTION_DEFAULT before publishing.",
+            ),
+            DeclareLaunchArgument(
+                "follow_target_distance_m",
+                default_value="0.75",
+                description="Nominal human standoff distance.",
+            ),
+            DeclareLaunchArgument(
+                "follow_stop_min_m",
+                default_value="0.5",
+                description="Lower edge of the stop band.",
+            ),
+            DeclareLaunchArgument(
+                "follow_stop_max_m",
+                default_value="1.0",
+                description="Upper edge of the stop band.",
+            ),
+            DeclareLaunchArgument(
+                "follow_max_forward_speed",
+                default_value="0.12",
+                description="Conservative max forward velocity in m/s.",
+            ),
+            DeclareLaunchArgument(
+                "follow_max_angular_speed",
+                default_value="0.25",
+                description="Conservative max yaw velocity in rad/s.",
+            ),
+            DeclareLaunchArgument(
+                "follow_forward_gain",
+                default_value="0.25",
+                description="Forward velocity gain from distance error.",
+            ),
+            DeclareLaunchArgument(
+                "follow_angular_gain",
+                default_value="0.8",
+                description="Yaw velocity gain from target bearing.",
+            ),
+            DeclareLaunchArgument(
+                "follow_center_deadzone_deg",
+                default_value="4.0",
+                description="Ignore target bearings smaller than this for base yaw.",
+            ),
+            DeclareLaunchArgument(
+                "follow_max_forward_bearing_deg",
+                default_value="10.0",
+                description="Only walk forward when target bearing is within this.",
+            ),
+            DeclareLaunchArgument(
+                "follow_control_rate_hz",
+                default_value="20.0",
+                description="Walking supervisor control-loop rate.",
+            ),
+            DeclareLaunchArgument(
+                "follow_reverse_enabled",
+                default_value="false",
+                description="When true, allow backing up if the person is too close.",
+            ),
+            DeclareLaunchArgument(
+                "follow_invert_angular",
+                default_value="false",
+                description="Flip base yaw direction if the robot turns away.",
+            ),
+            DeclareLaunchArgument(
+                "follow_require_waist_neutral",
+                default_value="true",
+                description="Block forward walking unless waist yaw is near neutral.",
+            ),
+            DeclareLaunchArgument(
+                "follow_waist_neutral_limit_deg",
+                default_value="5.0",
+                description="Maximum absolute waist yaw allowed for forward walking.",
+            ),
             Node(
                 package="yolo_person_detector",
                 executable="stereo_final_annotator_node",
@@ -393,6 +499,68 @@ def generate_launch_description():
                         "invert_yaw": ParameterValue(waist_invert_yaw, value_type=bool),
                         "soft_limit_deg": ParameterValue(
                             waist_soft_limit_deg, value_type=float
+                        ),
+                    }
+                ],
+            ),
+            Node(
+                package="x2_motion_audio_tools",
+                executable="x2_stereo_person_follow",
+                name="x2_stereo_person_follow",
+                output="screen",
+                parameters=[
+                    {
+                        "target_topic": target_point_topic,
+                        "waist_state_topic": waist_state_topic,
+                        "enabled": ParameterValue(follow_enabled, value_type=bool),
+                        "dry_run": ParameterValue(follow_dry_run, value_type=bool),
+                        "auto_enable_locomotion": ParameterValue(
+                            follow_auto_enable_locomotion, value_type=bool
+                        ),
+                        "target_distance_m": ParameterValue(
+                            follow_target_distance_m, value_type=float
+                        ),
+                        "stop_min_m": ParameterValue(
+                            follow_stop_min_m, value_type=float
+                        ),
+                        "stop_max_m": ParameterValue(
+                            follow_stop_max_m, value_type=float
+                        ),
+                        "max_forward_speed": ParameterValue(
+                            follow_max_forward_speed, value_type=float
+                        ),
+                        "max_angular_speed": ParameterValue(
+                            follow_max_angular_speed, value_type=float
+                        ),
+                        "forward_gain": ParameterValue(
+                            follow_forward_gain, value_type=float
+                        ),
+                        "angular_gain": ParameterValue(
+                            follow_angular_gain, value_type=float
+                        ),
+                        "center_deadzone_deg": ParameterValue(
+                            follow_center_deadzone_deg, value_type=float
+                        ),
+                        "max_forward_bearing_deg": ParameterValue(
+                            follow_max_forward_bearing_deg, value_type=float
+                        ),
+                        "reverse_enabled": ParameterValue(
+                            follow_reverse_enabled, value_type=bool
+                        ),
+                        "invert_angular": ParameterValue(
+                            follow_invert_angular, value_type=bool
+                        ),
+                        "require_waist_neutral_for_forward": ParameterValue(
+                            follow_require_waist_neutral, value_type=bool
+                        ),
+                        "waist_neutral_limit_deg": ParameterValue(
+                            follow_waist_neutral_limit_deg, value_type=float
+                        ),
+                        "target_timeout_sec": ParameterValue(
+                            target_timeout_sec, value_type=float
+                        ),
+                        "control_rate_hz": ParameterValue(
+                            follow_control_rate_hz, value_type=float
                         ),
                     }
                 ],
