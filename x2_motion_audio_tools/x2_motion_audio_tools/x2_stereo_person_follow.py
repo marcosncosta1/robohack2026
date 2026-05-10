@@ -143,9 +143,7 @@ class X2StereoPersonFollow(Node):
         self.declare_parameter("assist_wait_seconds", 7.0)
         self.declare_parameter("announce_enabled", False)
         self.declare_parameter("announce_startup_text", "I'm on my way")
-        self.declare_parameter("announce_stop_text", "Hold on")
         self.declare_parameter("announce_startup_emoji_id", 90)
-        self.declare_parameter("announce_stop_emoji_id", 200)
         self.declare_parameter("announce_emoji_mode", 1)
         self.declare_parameter("announce_tts_priority", 6)
         self.declare_parameter("announce_emoji_priority", 10)
@@ -219,14 +217,8 @@ class X2StereoPersonFollow(Node):
         self.announce_startup_text = str(
             self.get_parameter("announce_startup_text").value
         )
-        self.announce_stop_text = str(
-            self.get_parameter("announce_stop_text").value
-        )
         self.announce_startup_emoji_id = int(
             self.get_parameter("announce_startup_emoji_id").value
-        )
-        self.announce_stop_emoji_id = int(
-            self.get_parameter("announce_stop_emoji_id").value
         )
         self.announce_emoji_mode = int(
             self.get_parameter("announce_emoji_mode").value
@@ -712,11 +704,6 @@ class X2StereoPersonFollow(Node):
         self.get_logger().info(
             f"Arrived at person; starting timed assist wait for "
             f"{max(0.0, self.assist_wait_seconds):.2f}s."
-        )
-        self.announce(
-            "stop",
-            self.announce_stop_text,
-            self.announce_stop_emoji_id,
         )
         self.start_arm_pose_trigger()
         if self.assist_wait_seconds > 0.0:
