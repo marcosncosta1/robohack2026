@@ -2,6 +2,7 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -65,6 +66,18 @@ def generate_launch_description():
     follow_invert_angular = LaunchConfiguration("follow_invert_angular")
     follow_hold_base_in_stop_band = LaunchConfiguration(
         "follow_hold_base_in_stop_band"
+    )
+    assist_arm_pose_enabled = LaunchConfiguration("assist_arm_pose_enabled")
+    assist_arm_pose_trigger_topic = LaunchConfiguration(
+        "assist_arm_pose_trigger_topic"
+    )
+    assist_arm_shoulder_pitch_deg = LaunchConfiguration(
+        "assist_arm_shoulder_pitch_deg"
+    )
+    assist_arm_elbow_bend_deg = LaunchConfiguration("assist_arm_elbow_bend_deg")
+    assist_arm_move_seconds = LaunchConfiguration("assist_arm_move_seconds")
+    assist_arm_hold_indefinitely = LaunchConfiguration(
+        "assist_arm_hold_indefinitely"
     )
 
     return LaunchDescription(
@@ -332,6 +345,39 @@ def generate_launch_description():
                     "the close-distance stop band."
                 ),
             ),
+            DeclareLaunchArgument(
+                "assist_arm_pose_enabled",
+                default_value="false",
+                description=(
+                    "When true, launch the arm pose node and trigger it once "
+                    "when the follow supervisor first enters STOP_BAND."
+                ),
+            ),
+            DeclareLaunchArgument(
+                "assist_arm_pose_trigger_topic",
+                default_value="/x2/assist/raise_arms_trigger",
+                description="Bool topic used to trigger the assist arm pose.",
+            ),
+            DeclareLaunchArgument(
+                "assist_arm_shoulder_pitch_deg",
+                default_value="10.0",
+                description="Assist pose shoulder pitch in degrees.",
+            ),
+            DeclareLaunchArgument(
+                "assist_arm_elbow_bend_deg",
+                default_value="90.0",
+                description="Assist pose elbow bend in degrees.",
+            ),
+            DeclareLaunchArgument(
+                "assist_arm_move_seconds",
+                default_value="3.0",
+                description="Seconds used to move into the assist arm pose.",
+            ),
+            DeclareLaunchArgument(
+                "assist_arm_hold_indefinitely",
+                default_value="true",
+                description="Keep publishing the assist arm pose after reaching it.",
+            ),
             Node(
                 package="yolo_person_detector",
                 executable="stereo_final_annotator_node",
@@ -455,11 +501,41 @@ def generate_launch_description():
                         "hold_base_in_stop_band": ParameterValue(
                             follow_hold_base_in_stop_band, value_type=bool
                         ),
+                        "arm_pose_trigger_enabled": ParameterValue(
+                            assist_arm_pose_enabled, value_type=bool
+                        ),
+                        "arm_pose_trigger_topic": assist_arm_pose_trigger_topic,
                         "target_timeout_sec": ParameterValue(
                             target_timeout_sec, value_type=float
                         ),
                         "control_rate_hz": ParameterValue(
                             follow_control_rate_hz, value_type=float
+                        ),
+                    }
+                ],
+            ),
+            Node(
+                package="x2_motion_audio_tools",
+                executable="x2_raise_arms_pose",
+                name="x2_raise_arms_pose",
+                output="screen",
+                condition=IfCondition(assist_arm_pose_enabled),
+                parameters=[
+                    {
+                        "auto_start": False,
+                        "trigger_topic": assist_arm_pose_trigger_topic,
+                        "run_once": True,
+                        "shoulder_pitch_deg": ParameterValue(
+                            assist_arm_shoulder_pitch_deg, value_type=float
+                        ),
+                        "elbow_bend_deg": ParameterValue(
+                            assist_arm_elbow_bend_deg, value_type=float
+                        ),
+                        "move_seconds": ParameterValue(
+                            assist_arm_move_seconds, value_type=float
+                        ),
+                        "hold_indefinitely": ParameterValue(
+                            assist_arm_hold_indefinitely, value_type=bool
                         ),
                     }
                 ],

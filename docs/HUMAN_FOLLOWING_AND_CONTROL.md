@@ -113,7 +113,8 @@ ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
   follow_stop_min_m:=0.45 \
   follow_stop_max_m:=1.0 \
   follow_target_distance_m:=0.85 \
-  depth_disparity_percentile:=75.0
+  depth_disparity_percentile:=75.0 \
+  assist_arm_pose_enabled:=true
 ```
 
 For a more automated demo, the follow supervisor can request Stable Stand during
@@ -132,7 +133,8 @@ ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
   follow_stop_min_m:=0.45 \
   follow_stop_max_m:=1.0 \
   follow_target_distance_m:=0.85 \
-  depth_disparity_percentile:=75.0
+  depth_disparity_percentile:=75.0 \
+  assist_arm_pose_enabled:=true
 ```
 
 Runtime enable and disable:
@@ -162,21 +164,26 @@ Use low speed limits first. The robot should walk in place on the gantry while
 the target distance changes as the human approaches, then stop all base motion
 inside the stop band while the head continues tracking.
 
-Arm-only assist-ready pose test:
+Marcos-derived arm-only assist-ready pose test:
 
 ```bash
-ros2 run x2_motion_audio_tools x2_arm_assist_pose --dry-run
-
-ros2 run x2_motion_audio_tools x2_arm_assist_pose \
-  --arm-angle-deg 45 \
-  --move-seconds 5 \
-  --hold-seconds 0
+ros2 launch x2_motion_audio_tools x2_raise_arms_pose.launch.py \
+  shoulder_pitch_deg:=10.0 \
+  elbow_bend_deg:=90.0 \
+  move_seconds:=3.0
 ```
 
+For the integrated chair-assist demo, launch with
+`assist_arm_pose_enabled:=true`. The follow supervisor publishes one arm-pose
+trigger the first time it reaches `STOP_BAND` or `TOO_CLOSE`; if it stops again
+later, it only stands still. The arm pose is held indefinitely by default until
+the node is stopped or a future state publishes `data: false` to
+`/x2/assist/raise_arms_trigger`.
+
 The arm-only script publishes full-group HAL arm commands only. It does not
-publish locomotion velocity, does not switch robot modes, and does not command
-waist or torso joints. The future head-tap trigger and chair-assist state
-machine should integrate this behavior later, after the arm pose is smooth.
+publish locomotion velocity and does not command waist or torso joints. The
+future head-tap trigger and chair-assist state machine should reuse this
+trigger topic after the arm pose is smooth.
 
 Off-gantry testing should use lower speed limits than gantry testing, a clear
 area, and an active emergency stop. Keep reverse disabled until forward

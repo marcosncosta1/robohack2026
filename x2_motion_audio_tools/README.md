@@ -170,7 +170,8 @@ ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
   follow_stop_min_m:=0.45 \
   follow_stop_max_m:=1.0 \
   follow_target_distance_m:=0.85 \
-  depth_disparity_percentile:=75.0
+  depth_disparity_percentile:=75.0 \
+  assist_arm_pose_enabled:=true
 ```
 
 Once the manual `SD` sequence is trusted, the launch can request Stable Stand
@@ -189,7 +190,8 @@ ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
   follow_stop_min_m:=0.45 \
   follow_stop_max_m:=1.0 \
   follow_target_distance_m:=0.85 \
-  depth_disparity_percentile:=75.0
+  depth_disparity_percentile:=75.0 \
+  assist_arm_pose_enabled:=true
 ```
 
 The stereo walking supervisor publishes high-level
@@ -199,6 +201,11 @@ It never commands leg joints directly. It consumes
 only when the person is centered and farther than the stop band, and stops in
 the `0.5-1.0 m` range by default. By default, the base fully stops inside the
 stop band; the head can keep tracking without stepping in place.
+
+When `assist_arm_pose_enabled:=true`, the launch also starts
+`x2_raise_arms_pose` in trigger mode. The follow supervisor publishes one
+arm-pose trigger the first time it reaches `STOP_BAND` or `TOO_CLOSE`; later
+stops do not re-trigger the arm pose.
 
 The old waist tracking tools are still available as proof-of-concept utilities,
 but do not run them during the `SD` walking demo.
@@ -332,22 +339,22 @@ The motion nodes publish high-level locomotion velocity commands. Arm raising
 uses low-level HAL joint commands, so only run arm sections when the robot is
 stable and your AimDK/HAL safety procedure is satisfied.
 
-Arm-only assist-ready pose test:
+Marcos-derived arm-only assist-ready pose test:
 
 ```bash
-ros2 run x2_motion_audio_tools x2_arm_assist_pose --dry-run
-ros2 run x2_motion_audio_tools x2_arm_assist_pose \
-  --arm-angle-deg 45 \
-  --move-seconds 5 \
-  --hold-seconds 0
+ros2 launch x2_motion_audio_tools x2_raise_arms_pose.launch.py \
+  shoulder_pitch_deg:=10.0 \
+  elbow_bend_deg:=90.0 \
+  move_seconds:=3.0
 ```
 
-After the low-angle test is smooth, increase toward the default assist-ready
-pose:
+Manual trigger mode:
 
 ```bash
-ros2 run x2_motion_audio_tools x2_arm_assist_pose
+ros2 launch x2_motion_audio_tools x2_raise_arms_pose.launch.py auto_start:=false
+ros2 topic pub -1 /x2/assist/raise_arms_trigger std_msgs/Bool "data: true"
 ```
 
-`x2_arm_assist_pose` does not publish locomotion velocity, does not switch
-robot modes, and does not command waist or torso joints.
+`x2_raise_arms_pose` does not publish locomotion velocity and does not command
+waist or torso joints. It holds the pose indefinitely by default until the node
+is stopped or a future state publishes `data: false` to the trigger topic.

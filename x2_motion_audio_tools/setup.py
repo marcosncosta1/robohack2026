@@ -15,6 +15,13 @@ setup(
                 "launch/x2_person_follow.launch.py",
                 "launch/x2_person_track_torso.launch.py",
                 "launch/x2_stereo_head_track.launch.py",
+                "launch/x2_raise_arms_pose.launch.py",
+            ],
+        ),
+        (
+            "share/" + package_name + "/config",
+            [
+                "config/x2_raise_arms_pose.yaml",
             ],
         ),
     ],
@@ -42,6 +49,7 @@ setup(
             "x2_forward_back_raise_arms = x2_motion_audio_tools.x2_forward_back_raise_arms:main",
             "x2_forward_backward_steps = x2_motion_audio_tools.x2_forward_backward_steps:main",
             "x2_arm_assist_pose = x2_motion_audio_tools.x2_arm_assist_pose:main",
+            "x2_raise_arms_pose = x2_motion_audio_tools.x2_raise_arms_pose:main",
         ],
     },
 )

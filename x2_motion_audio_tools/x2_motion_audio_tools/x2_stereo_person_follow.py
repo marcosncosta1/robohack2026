@@ -114,6 +114,10 @@ class X2StereoPersonFollow(Node):
         self.declare_parameter("reverse_enabled", False)
         self.declare_parameter("invert_angular", False)
         self.declare_parameter("hold_base_in_stop_band", True)
+        self.declare_parameter("arm_pose_trigger_enabled", False)
+        self.declare_parameter(
+            "arm_pose_trigger_topic", "/x2/assist/raise_arms_trigger"
+        )
         self.declare_parameter("require_waist_neutral_for_forward", False)
         self.declare_parameter("waist_neutral_limit_deg", 5.0)
         self.declare_parameter("waist_state_timeout_sec", 0.5)
@@ -154,6 +158,12 @@ class X2StereoPersonFollow(Node):
         self.hold_base_in_stop_band = bool_param(
             self.get_parameter("hold_base_in_stop_band").value
         )
+        self.arm_pose_trigger_enabled = bool_param(
+            self.get_parameter("arm_pose_trigger_enabled").value
+        )
+        self.arm_pose_trigger_topic = str(
+            self.get_parameter("arm_pose_trigger_topic").value
+        )
         self.require_waist_neutral_for_forward = bool_param(
             self.get_parameter("require_waist_neutral_for_forward").value
         )
@@ -172,6 +182,7 @@ class X2StereoPersonFollow(Node):
         self.activation_in_progress = False
         self.last_log_time = 0.0
         self.last_stop_publish_time = 0.0
+        self.arm_pose_triggered = False
 
         if not AIMDK_AVAILABLE and not self.dry_run:
             self.get_logger().fatal(
@@ -222,6 +233,11 @@ class X2StereoPersonFollow(Node):
             self.enable_callback,
             RELIABLE_QOS,
             callback_group=self.cb_group,
+        )
+        self.arm_pose_trigger_pub = self.create_publisher(
+            Bool,
+            self.arm_pose_trigger_topic,
+            RELIABLE_QOS,
         )
         self.create_timer(
             self.control_period_sec,
@@ -415,6 +431,7 @@ class X2StereoPersonFollow(Node):
             return
 
         self.publish_velocity(forward, angular)
+        self.maybe_trigger_arm_pose(reason)
 
     def compute_velocity(self) -> tuple[float, float, str]:
         now = time.monotonic()
@@ -512,6 +529,23 @@ class X2StereoPersonFollow(Node):
         except Exception as exc:
             if rclpy.ok():
                 self.get_logger().warn(f"Failed to publish velocity: {exc}")
+
+    def maybe_trigger_arm_pose(self, reason: str) -> None:
+        if (
+            not self.arm_pose_trigger_enabled
+            or self.arm_pose_triggered
+            or self.dry_run
+            or reason not in {"STOP_BAND", "TOO_CLOSE"}
+        ):
+            return
+
+        msg = Bool()
+        msg.data = True
+        self.arm_pose_trigger_pub.publish(msg)
+        self.arm_pose_triggered = True
+        self.get_logger().info(
+            f"Published one-shot arm pose trigger on {self.arm_pose_trigger_topic}"
+        )
 
     def publish_stop(self) -> None:
         now = time.monotonic()
