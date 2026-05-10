@@ -2,8 +2,9 @@
 """Hold both arms in a forearms-forward assist pose.
 
 This is based on the arm pose routine from the `origin/marcos` branch, adjusted
-for the chair-assist demo: the pose is held indefinitely by default, and the
-node can be triggered once from the stereo follow stop state.
+for the chair-assist demo: the pose can be held indefinitely or for a finite
+assist window, and the node can be triggered once from the stereo follow stop
+state.
 """
 
 from __future__ import annotations
@@ -118,6 +119,7 @@ class RaiseArmsPose(Node):
         self.declare_parameter("move_seconds", 3.0)
         self.declare_parameter("hold_indefinitely", True)
         self.declare_parameter("hold_seconds", 0.0)
+        self.declare_parameter("release_seconds", 0.0)
         self.declare_parameter("move_stiffness", 8.0)
         self.declare_parameter("move_damping", 0.8)
         self.declare_parameter("hold_stiffness", 8.0)
@@ -140,6 +142,7 @@ class RaiseArmsPose(Node):
             self.get_parameter("hold_indefinitely").value
         )
         self.hold_seconds = float(self.get_parameter("hold_seconds").value)
+        self.release_seconds = float(self.get_parameter("release_seconds").value)
         self.move_stiffness = float(self.get_parameter("move_stiffness").value)
         self.move_damping = float(self.get_parameter("move_damping").value)
         self.hold_stiffness = float(self.get_parameter("hold_stiffness").value)
@@ -162,6 +165,8 @@ class RaiseArmsPose(Node):
             raise ValueError("move_seconds must be > 0")
         if self.hold_seconds < 0.0:
             raise ValueError("hold_seconds must be >= 0")
+        if self.release_seconds < 0.0:
+            raise ValueError("release_seconds must be >= 0")
 
         self.period = 1.0 / self.control_hz
         self.arm_positions: Optional[List[float]] = None
@@ -188,7 +193,9 @@ class RaiseArmsPose(Node):
         self.get_logger().info(
             "Raise-arms pose node ready: "
             f"auto_start={self.auto_start}, trigger_topic={self.trigger_topic}, "
-            f"run_once={self.run_once}, hold_indefinitely={self.hold_indefinitely}"
+            f"run_once={self.run_once}, hold_indefinitely={self.hold_indefinitely}, "
+            f"hold_seconds={self.hold_seconds:.2f}, "
+            f"release_seconds={self.release_seconds:.2f}"
         )
         if self.auto_start:
             self.start_pose_thread()
@@ -436,6 +443,32 @@ class RaiseArmsPose(Node):
                     damping=self.hold_damping,
                 )
                 time.sleep(self.period)
+
+            if self.cancel_event.is_set():
+                return
+
+            if not self.hold_indefinitely and self.release_seconds > 0.0:
+                self.get_logger().info(
+                    f"Releasing arm pose over {self.release_seconds:.2f}s."
+                )
+                release_start = list(target)
+                release_target = list(start)
+                release_start_time = time.monotonic()
+                while rclpy.ok() and not self.cancel_event.is_set():
+                    elapsed = time.monotonic() - release_start_time
+                    alpha = smoothstep(elapsed / self.release_seconds)
+                    positions = [
+                        s + (t - s) * alpha
+                        for s, t in zip(release_start, release_target)
+                    ]
+                    self.publish_arm_pose(
+                        positions,
+                        stiffness=self.move_stiffness,
+                        damping=self.move_damping,
+                    )
+                    if elapsed >= self.release_seconds:
+                        break
+                    time.sleep(self.period)
 
             self.get_logger().info("Arm pose routine inactive.")
         except Exception as exc:

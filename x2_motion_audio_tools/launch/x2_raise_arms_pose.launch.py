@@ -1,4 +1,4 @@
-"""Launch the one-shot, hold-indefinitely chair-assist arm pose."""
+"""Launch the one-shot chair-assist arm pose."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -18,6 +18,8 @@ def generate_launch_description():
     elbow_bend_deg = LaunchConfiguration("elbow_bend_deg")
     move_seconds = LaunchConfiguration("move_seconds")
     hold_indefinitely = LaunchConfiguration("hold_indefinitely")
+    hold_seconds = LaunchConfiguration("hold_seconds")
+    release_seconds = LaunchConfiguration("release_seconds")
     move_stiffness = LaunchConfiguration("move_stiffness")
     move_damping = LaunchConfiguration("move_damping")
     hold_stiffness = LaunchConfiguration("hold_stiffness")
@@ -59,6 +61,8 @@ def generate_launch_description():
             DeclareLaunchArgument("elbow_bend_deg", default_value="90.0"),
             DeclareLaunchArgument("move_seconds", default_value="3.0"),
             DeclareLaunchArgument("hold_indefinitely", default_value="true"),
+            DeclareLaunchArgument("hold_seconds", default_value="3.0"),
+            DeclareLaunchArgument("release_seconds", default_value="0.5"),
             DeclareLaunchArgument("move_stiffness", default_value="8.0"),
             DeclareLaunchArgument("move_damping", default_value="0.8"),
             DeclareLaunchArgument("hold_stiffness", default_value="8.0"),
@@ -103,6 +107,12 @@ def generate_launch_description():
                         ),
                         "hold_indefinitely": ParameterValue(
                             hold_indefinitely, value_type=bool
+                        ),
+                        "hold_seconds": ParameterValue(
+                            hold_seconds, value_type=float
+                        ),
+                        "release_seconds": ParameterValue(
+                            release_seconds, value_type=float
                         ),
                         "move_stiffness": ParameterValue(
                             move_stiffness, value_type=float

@@ -64,7 +64,9 @@ The first stereo walking behavior is intentionally conservative:
 
 - Stop if the target point is stale.
 - Stop if stereo depth is invalid.
-- Stop inside the `0.5-1.0 m` band.
+- Stop inside the `0.45-1.0 m` band.
+- Check close-range distance before yaw alignment, so the base does not rotate
+  on noisy bearings once the target is inside `1.0 m`.
 - Rotate in place when the target is off center.
 - Walk forward only when the target is centered and farther than `1.0 m`.
 - Do not reverse by default.
@@ -115,7 +117,11 @@ ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
   follow_target_distance_m:=0.85 \
   depth_disparity_percentile:=75.0 \
   assist_arm_pose_enabled:=true \
-  assist_head_pat_enabled:=true
+  assist_wait_seconds:=7.0 \
+  assist_arm_move_seconds:=3.0 \
+  assist_arm_hold_seconds:=3.0 \
+  assist_arm_release_seconds:=0.5 \
+  assist_arm_hold_indefinitely:=false
 ```
 
 For a more automated demo, the follow supervisor can request Stable Stand during
@@ -136,7 +142,11 @@ ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
   follow_target_distance_m:=0.85 \
   depth_disparity_percentile:=75.0 \
   assist_arm_pose_enabled:=true \
-  assist_head_pat_enabled:=true
+  assist_wait_seconds:=7.0 \
+  assist_arm_move_seconds:=3.0 \
+  assist_arm_hold_seconds:=3.0 \
+  assist_arm_release_seconds:=0.5 \
+  assist_arm_hold_indefinitely:=false
 ```
 
 Runtime enable and disable:
@@ -151,11 +161,17 @@ ros2 topic pub -1 /stereo_person/follow/enable std_msgs/Bool "data: false"
 Start with perception only. Confirm that `/stereo_person/target_point` is stable
 and that `point.z` changes correctly as a person approaches.
 
-Then run the follow supervisor in dry-run mode. Check logs:
+Then run the follow supervisor in dry-run mode. Include
+`assist_arm_pose_enabled:=true` when validating the integrated assist state; in
+dry-run the supervisor logs the timed trigger without publishing an arm trigger.
+Check logs:
 
 - Person centered and farther than `1.0 m`: `APPROACH`.
 - Person inside the stop band: `STOP_BAND` with `forward=0.000` and
   `angular=0.000`.
+- First assist arrival with arm pose enabled: one timed arm trigger followed by
+  `ASSIST_WAIT` with `forward=0.000` and `angular=0.000`.
+- After `assist_wait_seconds`: normal follow states resume.
 - Person off center: `ALIGN`.
 - Target too close: `TOO_CLOSE`.
 - Lost target: `NO_TARGET`.
@@ -172,26 +188,22 @@ Marcos-derived arm-only assist-ready pose test:
 ros2 launch x2_motion_audio_tools x2_raise_arms_pose.launch.py \
   shoulder_pitch_deg:=10.0 \
   elbow_bend_deg:=90.0 \
-  move_seconds:=3.0
+  move_seconds:=3.0 \
+  hold_indefinitely:=false \
+  hold_seconds:=3.0 \
+  release_seconds:=0.5
 ```
 
 For the integrated chair-assist demo, launch with
-`assist_arm_pose_enabled:=true assist_head_pat_enabled:=true`. The follow
-supervisor publishes one arm-pose trigger the first time it reaches `STOP_BAND`
-or `TOO_CLOSE`, then waits in place for a Bool true on `/x2/assist/head_pat`.
-That reset publishes `data: false` to `/x2/assist/raise_arms_trigger` and
-resumes normal following. If it stops again later, it only stands still.
-
-Manual head-pat simulation:
-
-```bash
-ros2 topic pub -1 /x2/assist/head_pat std_msgs/Bool "data: true"
-```
+`assist_arm_pose_enabled:=true`. The follow supervisor publishes one arm-pose
+trigger the first time it reaches `STOP_BAND` or `TOO_CLOSE`, then waits in
+place for `assist_wait_seconds` before resuming normal following. If it stops
+again later, it only stands still; it does not raise arms again.
 
 The arm-only script publishes full-group HAL arm commands only. It does not
 publish locomotion velocity and does not command waist or torso joints. The
-future head-tap trigger and chair-assist state machine should reuse this
-trigger topic after the arm pose is smooth.
+integrated assist path is time-based for now and should keep using `device:=cpu`
+unless CUDA is confirmed working on the robot image.
 
 Off-gantry testing should use lower speed limits than gantry testing, a clear
 area, and an active emergency stop. Keep reverse disabled until forward

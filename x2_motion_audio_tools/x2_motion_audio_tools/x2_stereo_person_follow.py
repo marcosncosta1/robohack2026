@@ -29,11 +29,13 @@ try:
         CommonState,
         JointStateArray,
         McActionCommand,
+        McControlArea,
         McLocomotionVelocity,
+        McPresetMotion,
         MessageHeader,
         RequestHeader,
     )
-    from aimdk_msgs.srv import SetMcAction, SetMcInputSource
+    from aimdk_msgs.srv import SetMcAction, SetMcInputSource, SetMcPresetMotion
 
     AIMDK_AVAILABLE = True
 except ImportError:
@@ -96,7 +98,7 @@ class X2StereoPersonFollow(Node):
         self.declare_parameter("auto_enable_locomotion", False)
         self.declare_parameter("source_name", SOURCE_NAME)
         self.declare_parameter("target_distance_m", 0.75)
-        self.declare_parameter("stop_min_m", 0.5)
+        self.declare_parameter("stop_min_m", 0.45)
         self.declare_parameter("stop_max_m", 1.0)
         self.declare_parameter("min_valid_depth_m", 0.3)
         self.declare_parameter("max_valid_depth_m", 4.0)
@@ -119,6 +121,10 @@ class X2StereoPersonFollow(Node):
             "arm_pose_trigger_topic", "/x2/assist/raise_arms_trigger"
         )
         self.declare_parameter("arm_pose_trigger_duration_sec", 2.0)
+        self.declare_parameter("arm_pose_use_preset_motion", True)
+        self.declare_parameter("arm_pose_preset_area_id", 3)
+        self.declare_parameter("arm_pose_preset_motion_id", 1010)
+        self.declare_parameter("assist_wait_seconds", 7.0)
         self.declare_parameter("assist_head_pat_enabled", False)
         self.declare_parameter("assist_head_pat_topic", "/x2/assist/head_pat")
         self.declare_parameter("require_waist_neutral_for_forward", False)
@@ -170,6 +176,18 @@ class X2StereoPersonFollow(Node):
         self.arm_pose_trigger_duration_sec = float(
             self.get_parameter("arm_pose_trigger_duration_sec").value
         )
+        self.arm_pose_use_preset_motion = bool_param(
+            self.get_parameter("arm_pose_use_preset_motion").value
+        )
+        self.arm_pose_preset_area_id = int(
+            self.get_parameter("arm_pose_preset_area_id").value
+        )
+        self.arm_pose_preset_motion_id = int(
+            self.get_parameter("arm_pose_preset_motion_id").value
+        )
+        self.assist_wait_seconds = float(
+            self.get_parameter("assist_wait_seconds").value
+        )
         self.assist_head_pat_enabled = bool_param(
             self.get_parameter("assist_head_pat_enabled").value
         )
@@ -196,9 +214,8 @@ class X2StereoPersonFollow(Node):
         self.last_stop_publish_time = 0.0
         self.arm_pose_triggered = False
         self.arms_used_once = False
-        self.waiting_for_head_pat = False
+        self.assist_wait_until = 0.0
         self.arm_pose_trigger_active_until = 0.0
-        self.arm_pose_release_active_until = 0.0
 
         if not AIMDK_AVAILABLE and not self.dry_run:
             self.get_logger().fatal(
@@ -238,10 +255,16 @@ class X2StereoPersonFollow(Node):
                 "/aimdk_5Fmsgs/srv/SetMcAction",
                 callback_group=self.cb_group,
             )
+            self.preset_motion_client = self.create_client(
+                SetMcPresetMotion,
+                "/aimdk_5Fmsgs/srv/SetMcPresetMotion",
+                callback_group=self.cb_group,
+            )
         else:
             self.velocity_pub = None
             self.input_source_client = None
             self.mc_action_client = None
+            self.preset_motion_client = None
 
         self.create_subscription(
             Bool,
@@ -273,7 +296,7 @@ class X2StereoPersonFollow(Node):
             f"enabled={self.enabled}, dry_run={self.dry_run}, "
             f"auto_enable_stable_stand={self.auto_enable_stable_stand}, "
             f"require_waist_neutral={self.require_waist_neutral_for_forward}, "
-            f"assist_head_pat={self.assist_head_pat_enabled}, "
+            f"assist_wait={self.assist_wait_seconds:.2f}s, "
             f"target_topic={self.target_topic}, stop_band=[{self.stop_min_m:.2f}, "
             f"{self.stop_max_m:.2f}]m, max_v={self.max_forward_speed:.2f}m/s, "
             f"max_w={self.max_angular_speed:.2f}rad/s"
@@ -304,18 +327,8 @@ class X2StereoPersonFollow(Node):
         if not msg.data or not self.assist_head_pat_enabled:
             return
 
-        if not self.waiting_for_head_pat:
-            self.get_logger().info("Head-pat event received outside wait state; ignoring.")
-            return
-
-        self.waiting_for_head_pat = False
-        self.arms_used_once = True
-        self.arm_pose_trigger_active_until = 0.0
-        self.arm_pose_release_active_until = (
-            time.monotonic() + max(0.1, self.arm_pose_trigger_duration_sec)
-        )
         self.get_logger().info(
-            "Head-pat reset received; releasing arm hold and resuming follow."
+            "Head-pat event ignored; integrated assist wait is time-based."
         )
 
     def spawn_activation(self) -> None:
@@ -467,8 +480,9 @@ class X2StereoPersonFollow(Node):
         if not self.enabled:
             return
 
-        if self.waiting_for_head_pat:
-            forward, angular, reason = 0.0, 0.0, "WAIT_FOR_HEAD_PAT"
+        self.update_assist_state(reason)
+        if self.assist_wait_active():
+            forward, angular, reason = 0.0, 0.0, "ASSIST_WAIT"
 
         self.log_throttled(reason, forward, angular)
 
@@ -476,7 +490,6 @@ class X2StereoPersonFollow(Node):
             return
 
         self.publish_velocity(forward, angular)
-        self.update_assist_state(reason)
 
     def compute_velocity(self) -> tuple[float, float, str]:
         now = time.monotonic()
@@ -491,6 +504,22 @@ class X2StereoPersonFollow(Node):
         if z_m < self.min_valid_depth_m or z_m > self.max_valid_depth_m:
             return 0.0, 0.0, "INVALID_DEPTH"
 
+        if self.stop_min_m <= z_m <= self.stop_max_m:
+            return 0.0, 0.0, "STOP_BAND"
+
+        if z_m < self.stop_min_m and self.reverse_enabled:
+            distance_error = self.target_distance_m - z_m
+            reverse = -clamp(
+                self.forward_gain * distance_error,
+                0.0,
+                self.max_reverse_speed,
+            )
+            reverse = -self.apply_min_velocity(abs(reverse), self.min_forward_speed)
+            return reverse, 0.0, "REVERSE"
+
+        if z_m < self.stop_min_m:
+            return 0.0, 0.0, "TOO_CLOSE"
+
         bearing_rad = math.atan2(self.target.x_m, z_m)
         angular = self.angular_velocity_for_bearing(bearing_rad)
 
@@ -501,34 +530,14 @@ class X2StereoPersonFollow(Node):
         if abs(bearing_rad) > self.max_forward_bearing_rad:
             return 0.0, angular, "ALIGN"
 
-        if self.stop_min_m <= z_m <= self.stop_max_m:
-            if self.hold_base_in_stop_band:
-                return 0.0, 0.0, "STOP_BAND"
-            return 0.0, angular, "STOP_BAND"
-
-        if z_m > self.stop_max_m:
-            distance_error = z_m - self.target_distance_m
-            forward = clamp(
-                self.forward_gain * distance_error,
-                0.0,
-                self.max_forward_speed,
-            )
-            forward = self.apply_min_velocity(forward, self.min_forward_speed)
-            return forward, angular, "APPROACH"
-
-        if z_m < self.stop_min_m and self.reverse_enabled:
-            distance_error = self.target_distance_m - z_m
-            reverse = -clamp(
-                self.forward_gain * distance_error,
-                0.0,
-                self.max_reverse_speed,
-            )
-            reverse = -self.apply_min_velocity(abs(reverse), self.min_forward_speed)
-            return reverse, angular, "REVERSE"
-
-        if self.hold_base_in_stop_band:
-            return 0.0, 0.0, "TOO_CLOSE"
-        return 0.0, angular, "TOO_CLOSE"
+        distance_error = z_m - self.target_distance_m
+        forward = clamp(
+            self.forward_gain * distance_error,
+            0.0,
+            self.max_forward_speed,
+        )
+        forward = self.apply_min_velocity(forward, self.min_forward_speed)
+        return forward, angular, "APPROACH"
 
     def angular_velocity_for_bearing(self, bearing_rad: float) -> float:
         if abs(bearing_rad) < self.center_deadzone_rad:
@@ -576,27 +585,40 @@ class X2StereoPersonFollow(Node):
                 self.get_logger().warn(f"Failed to publish velocity: {exc}")
 
     def update_assist_state(self, reason: str) -> None:
-        self.publish_pending_arm_release()
+        self.expire_assist_wait()
+        self.publish_pending_arm_trigger()
 
-        if self.waiting_for_head_pat:
+        if self.assist_wait_active():
             return
 
         if reason not in {"STOP_BAND", "TOO_CLOSE"}:
             return
 
-        if not self.assist_head_pat_enabled:
-            self.maybe_trigger_arm_pose(reason)
+        if not self.arm_pose_trigger_enabled:
             return
 
         if self.arms_used_once:
             return
 
-        self.waiting_for_head_pat = True
         self.arms_used_once = True
         self.get_logger().info(
-            "Arrived at person; entering WAIT_FOR_HEAD_PAT state."
+            f"Arrived at person; starting timed assist wait for "
+            f"{max(0.0, self.assist_wait_seconds):.2f}s."
         )
         self.start_arm_pose_trigger()
+        if self.assist_wait_seconds > 0.0:
+            self.assist_wait_until = time.monotonic() + self.assist_wait_seconds
+
+    def assist_wait_active(self) -> bool:
+        return self.assist_wait_until > time.monotonic()
+
+    def expire_assist_wait(self) -> None:
+        if self.assist_wait_until <= 0.0:
+            return
+        if time.monotonic() < self.assist_wait_until:
+            return
+        self.assist_wait_until = 0.0
+        self.get_logger().info("Timed assist wait complete; resuming normal follow.")
 
     def start_arm_pose_trigger(self) -> None:
         if not self.arm_pose_trigger_enabled:
@@ -607,16 +629,92 @@ class X2StereoPersonFollow(Node):
         self.arm_pose_trigger_active_until = (
             now + max(0.1, self.arm_pose_trigger_duration_sec)
         )
+        if self.dry_run:
+            mode = (
+                "preset-motion"
+                if self.arm_pose_use_preset_motion
+                else f"bool-trigger on {self.arm_pose_trigger_topic}"
+            )
+            self.get_logger().info(
+                f"Dry-run: would start one-shot arm pose ({mode})"
+            )
+            return
+
+        if self.arm_pose_use_preset_motion:
+            self.get_logger().info(
+                "Starting one-shot arm pose via MC preset "
+                f"area={self.arm_pose_preset_area_id}, "
+                f"motion={self.arm_pose_preset_motion_id}"
+            )
+            threading.Thread(
+                target=self._send_arm_preset_motion, daemon=True
+            ).start()
+            return
+
         self.get_logger().info(
             f"Starting one-shot arm pose trigger on {self.arm_pose_trigger_topic}"
         )
         self.publish_arm_pose_trigger(True)
 
-    def publish_pending_arm_release(self) -> None:
-        now = time.monotonic()
-        if self.arm_pose_release_active_until > now:
-            self.publish_arm_pose_trigger(False)
+    def _send_arm_preset_motion(self) -> None:
+        if self.preset_motion_client is None:
+            self.get_logger().error(
+                "Preset motion client unavailable; cannot send arm preset."
+            )
+            return
+        if not self.preset_motion_client.wait_for_service(timeout_sec=4.0):
+            self.get_logger().error(
+                "SetMcPresetMotion service unavailable; arm preset skipped."
+            )
+            return
 
+        req = SetMcPresetMotion.Request()
+        req.header = RequestHeader()
+        req.area = McControlArea()
+        req.motion = McPresetMotion()
+        req.area.value = self.arm_pose_preset_area_id
+        req.motion.value = self.arm_pose_preset_motion_id
+        req.interrupt = True
+
+        future = None
+        for attempt in range(8):
+            req.header.stamp = self.get_clock().now().to_msg()
+            future = self.preset_motion_client.call_async(req)
+            deadline = time.monotonic() + 0.5
+            while rclpy.ok() and not future.done() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            if future.done():
+                break
+            self.get_logger().debug(
+                f"SetMcPresetMotion retry [{attempt + 1}/8]"
+            )
+
+        if future is None or not future.done() or future.result() is None:
+            self.get_logger().error("SetMcPresetMotion call timed out.")
+            return
+
+        response = future.result()
+        if response.response.header.code == 0:
+            self.get_logger().info(
+                f"Arm preset accepted: task_id={response.response.task_id}"
+            )
+            return
+        if response.response.state.value == CommonState.RUNNING:
+            self.get_logger().info(
+                f"Arm preset running: task_id={response.response.task_id}"
+            )
+            return
+
+        self.get_logger().error(
+            "Arm preset rejected. Ensure robot is in Stable Stand."
+        )
+
+    def publish_pending_arm_trigger(self) -> None:
+        if self.dry_run:
+            return
+        if self.arm_pose_use_preset_motion:
+            return
+        now = time.monotonic()
         if self.arm_pose_trigger_active_until <= now:
             return
         self.publish_arm_pose_trigger(True)

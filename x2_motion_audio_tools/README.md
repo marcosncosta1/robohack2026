@@ -154,6 +154,10 @@ ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
   follow_dry_run:=true
 ```
 
+Add `assist_arm_pose_enabled:=true` to the dry-run command when validating the
+integrated assist state. In dry-run, the supervisor logs the timed arm trigger
+and `ASSIST_WAIT` state without publishing an arm trigger.
+
 Active gantry follow:
 
 ```bash
@@ -172,7 +176,11 @@ ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
   follow_target_distance_m:=0.85 \
   depth_disparity_percentile:=75.0 \
   assist_arm_pose_enabled:=true \
-  assist_head_pat_enabled:=true
+  assist_wait_seconds:=7.0 \
+  assist_arm_move_seconds:=3.0 \
+  assist_arm_hold_seconds:=3.0 \
+  assist_arm_release_seconds:=0.5 \
+  assist_arm_hold_indefinitely:=false
 ```
 
 Once the manual `SD` sequence is trusted, the launch can request Stable Stand
@@ -193,7 +201,11 @@ ros2 launch x2_motion_audio_tools x2_stereo_head_track.launch.py \
   follow_target_distance_m:=0.85 \
   depth_disparity_percentile:=75.0 \
   assist_arm_pose_enabled:=true \
-  assist_head_pat_enabled:=true
+  assist_wait_seconds:=7.0 \
+  assist_arm_move_seconds:=3.0 \
+  assist_arm_hold_seconds:=3.0 \
+  assist_arm_release_seconds:=0.5 \
+  assist_arm_hold_indefinitely:=false
 ```
 
 The stereo walking supervisor publishes high-level
@@ -201,15 +213,18 @@ The stereo walking supervisor publishes high-level
 It never commands leg joints directly. It consumes
 `/stereo_person/target_point`, rotates the base toward the target, walks forward
 only when the person is centered and farther than the stop band, and stops in
-the `0.5-1.0 m` range by default. By default, the base fully stops inside the
-stop band; the head can keep tracking without stepping in place.
+the `0.45-1.0 m` range by default. The supervisor checks close-range distance
+before yaw alignment, so once the target is inside `1.0 m` the base fully stops;
+the head can keep tracking without stepping in place.
 
 When `assist_arm_pose_enabled:=true`, the launch also starts
 `x2_raise_arms_pose` in trigger mode. The follow supervisor publishes one
-arm-pose trigger the first time it reaches `STOP_BAND` or `TOO_CLOSE`. With
-`assist_head_pat_enabled:=true`, it then waits in place until a Bool true is
-received on `/x2/assist/head_pat`; that releases the arm hold and resumes
-normal following. Later stops do not re-trigger the arm pose.
+arm-pose trigger the first time it reaches `STOP_BAND` or `TOO_CLOSE`, then
+holds the base stationary for `assist_wait_seconds` before normal following
+resumes. The integrated arm pose is time-based for now: move for
+`assist_arm_move_seconds`, hold for `assist_arm_hold_seconds`, release for
+`assist_arm_release_seconds`, and do not depend on a head-touch message. Later
+stops do not re-trigger the arm pose.
 
 The old waist tracking tools are still available as proof-of-concept utilities,
 but do not run them during the `SD` walking demo.
@@ -349,7 +364,10 @@ Marcos-derived arm-only assist-ready pose test:
 ros2 launch x2_motion_audio_tools x2_raise_arms_pose.launch.py \
   shoulder_pitch_deg:=10.0 \
   elbow_bend_deg:=90.0 \
-  move_seconds:=3.0
+  move_seconds:=3.0 \
+  hold_indefinitely:=false \
+  hold_seconds:=3.0 \
+  release_seconds:=0.5
 ```
 
 Manual trigger mode:
@@ -360,5 +378,5 @@ ros2 topic pub -1 /x2/assist/raise_arms_trigger std_msgs/Bool "data: true"
 ```
 
 `x2_raise_arms_pose` does not publish locomotion velocity and does not command
-waist or torso joints. It holds the pose indefinitely by default until the node
-is stopped or a future state publishes `data: false` to the trigger topic.
+waist or torso joints. In finite mode, it stops publishing after the release
+ramp so you can watch for post-release jitter with no walking enabled.

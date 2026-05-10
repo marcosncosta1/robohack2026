@@ -3,7 +3,7 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -68,17 +68,27 @@ def generate_launch_description():
         "follow_hold_base_in_stop_band"
     )
     assist_arm_pose_enabled = LaunchConfiguration("assist_arm_pose_enabled")
+    assist_arm_use_preset_motion = LaunchConfiguration(
+        "assist_arm_use_preset_motion"
+    )
+    assist_arm_preset_area_id = LaunchConfiguration("assist_arm_preset_area_id")
+    assist_arm_preset_motion_id = LaunchConfiguration(
+        "assist_arm_preset_motion_id"
+    )
     assist_arm_pose_trigger_topic = LaunchConfiguration(
         "assist_arm_pose_trigger_topic"
     )
     assist_arm_pose_trigger_duration_sec = LaunchConfiguration(
         "assist_arm_pose_trigger_duration_sec"
     )
+    assist_wait_seconds = LaunchConfiguration("assist_wait_seconds")
     assist_arm_shoulder_pitch_deg = LaunchConfiguration(
         "assist_arm_shoulder_pitch_deg"
     )
     assist_arm_elbow_bend_deg = LaunchConfiguration("assist_arm_elbow_bend_deg")
     assist_arm_move_seconds = LaunchConfiguration("assist_arm_move_seconds")
+    assist_arm_hold_seconds = LaunchConfiguration("assist_arm_hold_seconds")
+    assist_arm_release_seconds = LaunchConfiguration("assist_arm_release_seconds")
     assist_arm_hold_indefinitely = LaunchConfiguration(
         "assist_arm_hold_indefinitely"
     )
@@ -284,7 +294,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "follow_stop_min_m",
-                default_value="0.5",
+                default_value="0.45",
                 description="Lower edge of the stop band.",
             ),
             DeclareLaunchArgument(
@@ -346,8 +356,8 @@ def generate_launch_description():
                 "follow_hold_base_in_stop_band",
                 default_value="true",
                 description=(
-                    "When true, stop base yaw as well as forward motion inside "
-                    "the close-distance stop band."
+                    "Compatibility flag. Close-range stop now suppresses base "
+                    "yaw before alignment is evaluated."
                 ),
             ),
             DeclareLaunchArgument(
@@ -359,6 +369,29 @@ def generate_launch_description():
                 ),
             ),
             DeclareLaunchArgument(
+                "assist_arm_use_preset_motion",
+                default_value="true",
+                description=(
+                    "When true, the follow supervisor fires the arm emote via "
+                    "SetMcPresetMotion instead of a Bool trigger topic. In "
+                    "preset mode the legacy x2_raise_arms_pose node is not "
+                    "launched."
+                ),
+            ),
+            DeclareLaunchArgument(
+                "assist_arm_preset_area_id",
+                default_value="3",
+                description="McControlArea.value for the arm preset motion.",
+            ),
+            DeclareLaunchArgument(
+                "assist_arm_preset_motion_id",
+                default_value="1010",
+                description=(
+                    "McPresetMotion.value. 1010 = raise both hands in the "
+                    "AimDK preset table."
+                ),
+            ),
+            DeclareLaunchArgument(
                 "assist_arm_pose_trigger_topic",
                 default_value="/x2/assist/raise_arms_trigger",
                 description="Bool topic used to trigger the assist arm pose.",
@@ -367,6 +400,14 @@ def generate_launch_description():
                 "assist_arm_pose_trigger_duration_sec",
                 default_value="2.0",
                 description="Seconds to repeatedly publish the one-shot arm trigger.",
+            ),
+            DeclareLaunchArgument(
+                "assist_wait_seconds",
+                default_value="7.0",
+                description=(
+                    "Seconds to keep the base stationary during the first timed "
+                    "assist stop."
+                ),
             ),
             DeclareLaunchArgument(
                 "assist_arm_shoulder_pitch_deg",
@@ -384,22 +425,32 @@ def generate_launch_description():
                 description="Seconds used to move into the assist arm pose.",
             ),
             DeclareLaunchArgument(
+                "assist_arm_hold_seconds",
+                default_value="3.0",
+                description="Seconds to hold the finite assist arm pose.",
+            ),
+            DeclareLaunchArgument(
+                "assist_arm_release_seconds",
+                default_value="0.5",
+                description="Seconds used to move out of the finite assist arm pose.",
+            ),
+            DeclareLaunchArgument(
                 "assist_arm_hold_indefinitely",
-                default_value="true",
+                default_value="false",
                 description="Keep publishing the assist arm pose after reaching it.",
             ),
             DeclareLaunchArgument(
                 "assist_head_pat_enabled",
                 default_value="false",
                 description=(
-                    "When true, first arrival waits for a head-pat Bool event "
-                    "before resuming follow."
+                    "Deprecated compatibility flag. The integrated assist wait "
+                    "is time-based and does not use head-pat input."
                 ),
             ),
             DeclareLaunchArgument(
                 "assist_head_pat_topic",
                 default_value="/x2/assist/head_pat",
-                description="Bool topic used as the head-pat reset input.",
+                description="Deprecated head-pat topic; ignored by timed assist.",
             ),
             Node(
                 package="yolo_person_detector",
@@ -531,6 +582,18 @@ def generate_launch_description():
                         "arm_pose_trigger_duration_sec": ParameterValue(
                             assist_arm_pose_trigger_duration_sec, value_type=float
                         ),
+                        "arm_pose_use_preset_motion": ParameterValue(
+                            assist_arm_use_preset_motion, value_type=bool
+                        ),
+                        "arm_pose_preset_area_id": ParameterValue(
+                            assist_arm_preset_area_id, value_type=int
+                        ),
+                        "arm_pose_preset_motion_id": ParameterValue(
+                            assist_arm_preset_motion_id, value_type=int
+                        ),
+                        "assist_wait_seconds": ParameterValue(
+                            assist_wait_seconds, value_type=float
+                        ),
                         "assist_head_pat_enabled": ParameterValue(
                             assist_head_pat_enabled, value_type=bool
                         ),
@@ -549,7 +612,17 @@ def generate_launch_description():
                 executable="x2_raise_arms_pose",
                 name="x2_raise_arms_pose",
                 output="screen",
-                condition=IfCondition(assist_arm_pose_enabled),
+                condition=IfCondition(
+                    PythonExpression(
+                        [
+                            "'",
+                            assist_arm_pose_enabled,
+                            "' == 'true' and '",
+                            assist_arm_use_preset_motion,
+                            "' == 'false'",
+                        ]
+                    )
+                ),
                 parameters=[
                     {
                         "auto_start": False,
@@ -563,6 +636,12 @@ def generate_launch_description():
                         ),
                         "move_seconds": ParameterValue(
                             assist_arm_move_seconds, value_type=float
+                        ),
+                        "hold_seconds": ParameterValue(
+                            assist_arm_hold_seconds, value_type=float
+                        ),
+                        "release_seconds": ParameterValue(
+                            assist_arm_release_seconds, value_type=float
                         ),
                         "hold_indefinitely": ParameterValue(
                             assist_arm_hold_indefinitely, value_type=bool
