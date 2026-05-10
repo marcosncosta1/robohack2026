@@ -1,4 +1,4 @@
-"""Launch stereo person target detection and yaw-only head tracking."""
+"""Launch stereo person target detection with head and optional torso tracking."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -41,6 +41,20 @@ def generate_launch_description():
     hold_on_lost = LaunchConfiguration("hold_on_lost")
     invert_yaw = LaunchConfiguration("invert_yaw")
     soft_limit_deg = LaunchConfiguration("soft_limit_deg")
+    torso_enabled = LaunchConfiguration("torso_enabled")
+    torso_dry_run = LaunchConfiguration("torso_dry_run")
+    waist_state_topic = LaunchConfiguration("waist_state_topic")
+    waist_command_topic = LaunchConfiguration("waist_command_topic")
+    waist_yaw_gain = LaunchConfiguration("waist_yaw_gain")
+    waist_start_threshold_deg = LaunchConfiguration("waist_start_threshold_deg")
+    waist_center_deadzone_deg = LaunchConfiguration("waist_center_deadzone_deg")
+    waist_use_ruckig = LaunchConfiguration("waist_use_ruckig")
+    waist_max_yaw_velocity = LaunchConfiguration("waist_max_yaw_velocity")
+    waist_max_yaw_acceleration = LaunchConfiguration("waist_max_yaw_acceleration")
+    waist_max_yaw_jerk = LaunchConfiguration("waist_max_yaw_jerk")
+    waist_hold_on_lost = LaunchConfiguration("waist_hold_on_lost")
+    waist_invert_yaw = LaunchConfiguration("waist_invert_yaw")
+    waist_soft_limit_deg = LaunchConfiguration("waist_soft_limit_deg")
 
     return LaunchDescription(
         [
@@ -204,6 +218,76 @@ def generate_launch_description():
                 default_value="20.0",
                 description="Symmetric software yaw limit, bounded by robot joint limits.",
             ),
+            DeclareLaunchArgument(
+                "torso_enabled",
+                default_value="false",
+                description="When true, publish waist yaw commands.",
+            ),
+            DeclareLaunchArgument(
+                "torso_dry_run",
+                default_value="false",
+                description="When true, log waist commands but do not publish them.",
+            ),
+            DeclareLaunchArgument(
+                "waist_state_topic",
+                default_value="/aima/hal/joint/waist/state",
+                description="HAL waist joint state topic.",
+            ),
+            DeclareLaunchArgument(
+                "waist_command_topic",
+                default_value="/aima/hal/joint/waist/command",
+                description="HAL waist joint command topic.",
+            ),
+            DeclareLaunchArgument(
+                "waist_yaw_gain",
+                default_value="0.45",
+                description="Waist yaw gain from target bearing to joint target.",
+            ),
+            DeclareLaunchArgument(
+                "waist_start_threshold_deg",
+                default_value="8.0",
+                description="Only start torso yaw when target bearing exceeds this.",
+            ),
+            DeclareLaunchArgument(
+                "waist_center_deadzone_deg",
+                default_value="3.0",
+                description="Ignore target bearings smaller than this for torso yaw.",
+            ),
+            DeclareLaunchArgument(
+                "waist_use_ruckig",
+                default_value="true",
+                description="Use Ruckig trajectory planning for waist yaw commands.",
+            ),
+            DeclareLaunchArgument(
+                "waist_max_yaw_velocity",
+                default_value="1.0",
+                description="Maximum commanded waist yaw speed in rad/s.",
+            ),
+            DeclareLaunchArgument(
+                "waist_max_yaw_acceleration",
+                default_value="1.0",
+                description="Maximum commanded waist yaw acceleration in rad/s^2.",
+            ),
+            DeclareLaunchArgument(
+                "waist_max_yaw_jerk",
+                default_value="25.0",
+                description="Maximum commanded waist yaw jerk in rad/s^3.",
+            ),
+            DeclareLaunchArgument(
+                "waist_hold_on_lost",
+                default_value="true",
+                description="Hold last waist command when the target is lost.",
+            ),
+            DeclareLaunchArgument(
+                "waist_invert_yaw",
+                default_value="false",
+                description="Flip waist yaw correction if the torso turns away.",
+            ),
+            DeclareLaunchArgument(
+                "waist_soft_limit_deg",
+                default_value="35.0",
+                description="Symmetric waist yaw software limit.",
+            ),
             Node(
                 package="yolo_person_detector",
                 executable="stereo_final_annotator_node",
@@ -266,6 +350,50 @@ def generate_launch_description():
                         "hold_on_lost": ParameterValue(hold_on_lost, value_type=bool),
                         "invert_yaw": ParameterValue(invert_yaw, value_type=bool),
                         "soft_limit_deg": ParameterValue(soft_limit_deg, value_type=float),
+                    }
+                ],
+            ),
+            Node(
+                package="x2_motion_audio_tools",
+                executable="x2_waist_yaw_tracker",
+                name="x2_waist_yaw_tracker",
+                output="screen",
+                parameters=[
+                    {
+                        "target_topic": target_point_topic,
+                        "head_state_topic": head_state_topic,
+                        "waist_state_topic": waist_state_topic,
+                        "waist_command_topic": waist_command_topic,
+                        "enabled": ParameterValue(torso_enabled, value_type=bool),
+                        "dry_run": ParameterValue(torso_dry_run, value_type=bool),
+                        "yaw_gain": ParameterValue(waist_yaw_gain, value_type=float),
+                        "start_threshold_deg": ParameterValue(
+                            waist_start_threshold_deg, value_type=float
+                        ),
+                        "center_deadzone_deg": ParameterValue(
+                            waist_center_deadzone_deg, value_type=float
+                        ),
+                        "use_ruckig": ParameterValue(waist_use_ruckig, value_type=bool),
+                        "max_yaw_velocity": ParameterValue(
+                            waist_max_yaw_velocity, value_type=float
+                        ),
+                        "max_yaw_acceleration": ParameterValue(
+                            waist_max_yaw_acceleration, value_type=float
+                        ),
+                        "max_yaw_jerk": ParameterValue(
+                            waist_max_yaw_jerk, value_type=float
+                        ),
+                        "target_timeout_sec": ParameterValue(
+                            target_timeout_sec, value_type=float
+                        ),
+                        "control_rate_hz": ParameterValue(
+                            control_rate_hz, value_type=float
+                        ),
+                        "hold_on_lost": ParameterValue(waist_hold_on_lost, value_type=bool),
+                        "invert_yaw": ParameterValue(waist_invert_yaw, value_type=bool),
+                        "soft_limit_deg": ParameterValue(
+                            waist_soft_limit_deg, value_type=float
+                        ),
                     }
                 ],
             ),
