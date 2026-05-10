@@ -34,6 +34,8 @@ setup(
             'stereo_image_view_node = yolo_person_detector.stereo_image_view_node:main',
             'stereo_yolo_detect_node = yolo_person_detector.stereo_yolo_detect_node:main',
             'stereo_bbox_depth_node = yolo_person_detector.stereo_bbox_depth_node:main',
+            'stereo_final_annotator_node = yolo_person_detector.stereo_final_annotator_node:main',
+            'view_stereo = yolo_person_detector.view_stereo_node:main',
         ],
     },
 )

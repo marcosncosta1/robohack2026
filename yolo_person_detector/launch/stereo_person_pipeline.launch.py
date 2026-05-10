@@ -1,35 +1,51 @@
-"""Launch the simple stereo image -> YOLO bbox pipeline."""
+"""Launch the final compressed stereo person annotation pipeline."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    camera = LaunchConfiguration("camera")
-    topic_type = LaunchConfiguration("topic_type")
+    left_image_topic = LaunchConfiguration("left_image_topic")
+    right_image_topic = LaunchConfiguration("right_image_topic")
+    left_camera_info_topic = LaunchConfiguration("left_camera_info_topic")
+    right_camera_info_topic = LaunchConfiguration("right_camera_info_topic")
+    output_topic = LaunchConfiguration("output_topic")
     device = LaunchConfiguration("device")
     model = LaunchConfiguration("model")
     confidence = LaunchConfiguration("confidence")
-    enable_depth = LaunchConfiguration("enable_depth")
+    input_size = LaunchConfiguration("input_size")
     baseline_m = LaunchConfiguration("baseline_m")
-    annotated_compressed_topic = LaunchConfiguration("annotated_compressed_topic")
-    depth_debug_compressed_topic = LaunchConfiguration("depth_debug_compressed_topic")
+    sync_slop_sec = LaunchConfiguration("sync_slop_sec")
     jpeg_quality = LaunchConfiguration("jpeg_quality")
 
     return LaunchDescription(
         [
             DeclareLaunchArgument(
-                "camera",
-                default_value="stereo_head_front_left",
-                description="stereo_head_front_left or stereo_head_front_right",
+                "left_image_topic",
+                default_value="/aima/hal/sensor/stereo_head_front_left/rgb_image/compressed",
+                description="Left stereo compressed image topic",
             ),
             DeclareLaunchArgument(
-                "topic_type",
-                default_value="rgb_image_compressed",
-                description="rgb_image or rgb_image_compressed",
+                "right_image_topic",
+                default_value="/aima/hal/sensor/stereo_head_front_right/rgb_image/compressed",
+                description="Right stereo compressed image topic",
+            ),
+            DeclareLaunchArgument(
+                "left_camera_info_topic",
+                default_value="/aima/hal/sensor/stereo_head_front_left/camera_info",
+                description="Left stereo camera info topic",
+            ),
+            DeclareLaunchArgument(
+                "right_camera_info_topic",
+                default_value="/aima/hal/sensor/stereo_head_front_right/camera_info",
+                description="Right stereo camera info topic",
+            ),
+            DeclareLaunchArgument(
+                "output_topic",
+                default_value="/stereo_person/final_annotated_image/compressed",
+                description="Final annotated compressed JPEG output topic",
             ),
             DeclareLaunchArgument(
                 "device",
@@ -47,9 +63,9 @@ def generate_launch_description():
                 description="YOLO confidence threshold",
             ),
             DeclareLaunchArgument(
-                "enable_depth",
-                default_value="false",
-                description="Start stereo bbox depth estimation",
+                "input_size",
+                default_value="640",
+                description="YOLO model input image size",
             ),
             DeclareLaunchArgument(
                 "baseline_m",
@@ -57,14 +73,9 @@ def generate_launch_description():
                 description="Manual stereo baseline in meters if CameraInfo lacks Tx",
             ),
             DeclareLaunchArgument(
-                "annotated_compressed_topic",
-                default_value="/stereo_person/annotated_image/compressed",
-                description="Compressed JPEG topic for YOLO-annotated stereo images",
-            ),
-            DeclareLaunchArgument(
-                "depth_debug_compressed_topic",
-                default_value="/stereo_person/depth_debug_image/compressed",
-                description="Compressed JPEG topic for depth-annotated stereo images",
+                "sync_slop_sec",
+                default_value="0.05",
+                description="Maximum timestamp difference between left and right frames",
             ),
             DeclareLaunchArgument(
                 "jpeg_quality",
@@ -73,41 +84,22 @@ def generate_launch_description():
             ),
             Node(
                 package="yolo_person_detector",
-                executable="stereo_image_view_node",
-                name="stereo_image_view",
+                executable="stereo_final_annotator_node",
+                name="stereo_final_annotator",
                 output="screen",
                 parameters=[
                     {
-                        "camera": camera,
-                        "topic_type": topic_type,
-                    }
-                ],
-            ),
-            Node(
-                package="yolo_person_detector",
-                executable="stereo_yolo_detect_node",
-                name="stereo_yolo_detect",
-                output="screen",
-                parameters=[
-                    {
+                        "left_image_topic": left_image_topic,
+                        "right_image_topic": right_image_topic,
+                        "left_camera_info_topic": left_camera_info_topic,
+                        "right_camera_info_topic": right_camera_info_topic,
+                        "output_topic": output_topic,
                         "device": device,
                         "model_path": model,
                         "confidence_threshold": confidence,
-                        "annotated_compressed_topic": annotated_compressed_topic,
-                        "jpeg_quality": jpeg_quality,
-                    }
-                ],
-            ),
-            Node(
-                package="yolo_person_detector",
-                executable="stereo_bbox_depth_node",
-                name="stereo_bbox_depth",
-                output="screen",
-                condition=IfCondition(enable_depth),
-                parameters=[
-                    {
+                        "input_size": input_size,
                         "baseline_m": baseline_m,
-                        "debug_compressed_topic": depth_debug_compressed_topic,
+                        "sync_slop_sec": sync_slop_sec,
                         "jpeg_quality": jpeg_quality,
                     }
                 ],

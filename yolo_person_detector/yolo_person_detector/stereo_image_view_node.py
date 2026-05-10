@@ -83,6 +83,7 @@ class StereoImageViewNode(Node):
             self.topic_type = "rgb_image"
 
         self.image_topic = self._resolve_image_topic()
+        self.start_time = time.time()
         self.frame_count = 0
         self.last_image_time = 0.0
 
@@ -149,11 +150,19 @@ class StereoImageViewNode(Node):
 
     def _check_timeout(self) -> None:
         if self.last_image_time == 0.0:
+            elapsed = time.time() - self.start_time
+            if elapsed > self.timeout_sec:
+                self.get_logger().warn(
+                    f"No images received yet from {self.image_topic} "
+                    f"after {elapsed:.1f}s",
+                    throttle_duration_sec=3.0,
+                )
             return
         elapsed = time.time() - self.last_image_time
         if elapsed > self.timeout_sec:
             self.get_logger().warn(
-                f"No images from {self.image_topic} for {elapsed:.1f}s"
+                f"No images from {self.image_topic} for {elapsed:.1f}s",
+                throttle_duration_sec=3.0,
             )
 
 

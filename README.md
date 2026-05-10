@@ -150,7 +150,39 @@ ros2 topic echo /yolo/detections                       # detection list
 ros2 run rqt_image_view rqt_image_view /yolo/detection_image
 ```
 
-### B. Person follower (robot WILL move)
+### B. Stereo compressed person + depth view
+
+This uses the front stereo head compressed JPEG pair, runs YOLO on the left
+image, adds best-effort stereo depth labels, and publishes one final compressed
+JPEG stream:
+
+```bash
+ros2 launch yolo_person_detector stereo_person_pipeline.launch.py \
+    device:=cuda \
+    confidence:=0.5
+```
+
+Monitor the final stream on the robot:
+
+```bash
+ros2 topic hz /stereo_person/final_annotated_image/compressed --qos-reliability best_effort
+```
+
+On your laptop, after ROS networking is pointed at the robot:
+
+```bash
+ros2 run yolo_person_detector view_stereo
+```
+
+If `CameraInfo` does not provide a stereo baseline, pass the measured baseline:
+
+```bash
+ros2 launch yolo_person_detector stereo_person_pipeline.launch.py \
+    device:=cuda \
+    baseline_m:=0.06
+```
+
+### C. Person follower (robot WILL move)
 
 **Safety checklist before enabling the follower:**
 
